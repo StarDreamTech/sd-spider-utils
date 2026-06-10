@@ -1,4 +1,5 @@
 
+
 def load_json_data(filepath):
     """
     读取 json / jsonl / jl 文件，统一返回列表数据。
@@ -90,20 +91,39 @@ def data2excel(
     return df
 
 
-def json2excel(filepath, drop_duplicates_subset=None, exclude_columns=None):
+def json2excel(
+    filepath,
+    drop_duplicates_subset=None,
+    exclude_columns=None,
+    output_filepath=None,
+    output_filename=None,
+):
     """
     兼容旧调用：读取 json/jl 文件并输出同名 Excel。
 
     :param filepath: JSON/JL 文件路径
     :param drop_duplicates_subset: 用于去重的列名列表，例如 ['链接']
     :param exclude_columns: 导出时需要排除的列名列表，例如 ['原始文本列表']
+    :param output_filepath: 可选的 Excel 输出路径；可单独传完整路径，也可与 output_filename 组合使用目录
+    :param output_filename: 可选的 Excel 输出文件名；可单独传文件名，也可与 output_filepath 组合覆盖默认文件名
     :return:
     """
     import os
 
-    folder_path = os.path.dirname(filepath)
-    file_name = os.path.splitext(os.path.basename(filepath))[0]
-    output_filepath = os.path.join(folder_path, f"{file_name}.xlsx")
+    default_folder_path = os.path.dirname(filepath)
+    default_file_name = f"{os.path.splitext(os.path.basename(filepath))[0]}.xlsx"
+
+    if output_filepath:
+        output_folder_path = os.path.dirname(output_filepath) or default_folder_path
+        output_file_name = os.path.basename(output_filepath) or default_file_name
+    else:
+        output_folder_path = default_folder_path
+        output_file_name = default_file_name
+
+    if output_filename:
+        output_file_name = output_filename
+
+    output_filepath = os.path.join(output_folder_path, output_file_name)
     obj_list = load_json_data(filepath)
     data2excel(
         obj_list,
@@ -111,3 +131,6 @@ def json2excel(filepath, drop_duplicates_subset=None, exclude_columns=None):
         drop_duplicates_subset=drop_duplicates_subset,
         exclude_columns=exclude_columns,
     )
+
+if __name__ == "__main__":
+    print(1)
