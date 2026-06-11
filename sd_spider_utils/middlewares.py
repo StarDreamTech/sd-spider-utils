@@ -1,5 +1,8 @@
 from urllib.parse import urlsplit, urlunsplit
 
+from scrapy.http import HtmlResponse
+from twisted.internet.threads import deferToThread
+
 
 def _mask_proxy_url(proxy_url: str) -> str:
     """脱敏代理地址，避免日志泄露账户密码。"""
@@ -26,25 +29,14 @@ class RequestsGoMMiddleware:
         print("go requests")
 
         proxies = None
-        if request.meta.get("use_proxy"):
-            proxy_type = request.meta.get("proxy_type", "clash")
-            proxy_url = None
-            if proxy_type == "tunnel":
-                # 隧道代理地址，参考其他中间件配置，这里需要根据实际情况填写或配置
-                proxy_url = TUNNEL_PROXY_URL
-            elif proxy_type == "clash":
-                proxy_url = "http://127.0.0.1:7897"
-
-            # 如果meta直接传了proxy地址，则优先使用
-            if request.meta.get("proxy"):
-                proxy_url = request.meta.get("proxy")
-
-            if proxy_url:
+        if request.meta.get("proxy"):
+            proxy = request.meta.get("proxy")
+            if proxy:
                 proxies = {
-                    "http": proxy_url,
-                    "https": proxy_url,
+                    "http": proxy,
+                    "https": proxy,
                 }
-                print(f"RequestsGoMMiddleware 使用代理: {_mask_proxy_url(proxy_url)}")
+                print(f"RequestsGoMMiddleware 使用代理: {_mask_proxy_url(proxy)}")
 
         common_kwargs = {
             "url": request.url,
@@ -89,8 +81,7 @@ class RequestsGoMMiddleware:
 
 class TunnelProxyMiddleware:
     def process_request(self, request, spider):
-        if request.meta.get("use_proxy"):
-            proxy = TUNNEL_PROXY_URL
+        if proxy:=request.meta.get("proxy"):
             request.meta["proxy"] = proxy
             print(f"使用了代理{_mask_proxy_url(proxy)}")
 
@@ -105,7 +96,6 @@ class ScraplingMiddleware:
 
         def fetch_in_clean_thread():
             import asyncio
-            # 在线程内按需创建事件循环，避免使用已弃用的全局 policy 接口
             try:
                 asyncio.get_event_loop()
             except RuntimeError:
@@ -113,12 +103,7 @@ class ScraplingMiddleware:
                 asyncio.set_event_loop(loop)
 
             from scrapling import StealthyFetcher
-            proxy = None
-            if request.meta.get("proxy_type") == "clash":
-                proxy = CLASH_PROXY_URL
-            if request.meta.get("proxy_type") == "tunnel":
-                proxy = TUNNEL_PROXY_URL
-            # 在此循环内运行 stealthy_fetcher
+            proxy = request.meta.get("proxy")
             return StealthyFetcher.fetch(request.url, solve_cloudflare=True, proxy=proxy)
 
         return deferToThread(fetch_in_clean_thread).addCallback(
