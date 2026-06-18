@@ -18,6 +18,8 @@ def singleton(cls):
 class SingletonChromium(Chromium):
     ...
 
+# TODO new_tab方法如果浏览器关了的话会报错，error，disconnect
+
 def save_page(url,path=None,name=None,as_pdf=False):
     from DrissionPage import Chromium,ChromiumOptions
     co=ChromiumOptions()

@@ -3,3 +3,5 @@ Scrapy
 APScheduler
 beautifulsoup4
 SQLAlchemy
+DrissionPage
+requests_go
