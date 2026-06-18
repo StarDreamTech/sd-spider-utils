@@ -21,6 +21,19 @@ def normalize_text(text):
     text = text.strip()
     return text
 
+def normalize_obj(obj):
+    '''
+    递归标准化所有文本字段
+    '''
+    if isinstance(obj, dict):
+        return {k: normalize_obj(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [normalize_obj(v) for v in obj]
+    elif isinstance(obj, str):
+        return normalize_text(obj)
+    else:
+        return obj
+
 def clean_text(text: str):
     # 替换非断空白符为普通空格
     text = text.replace("\xa0", " ")
