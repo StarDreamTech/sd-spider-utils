@@ -61,3 +61,36 @@ def download_page(url, save_path, rename, page_session=None):
     except Exception as e:
         print(f"下载失败：{rename}，错误：{e}")
 
+
+def get_html_from_chrome(url,port=None,mode=None,proxy=None,wait_api=None,wait_api_timeout=20):
+    '''
+    从 Chrome 浏览器获取 HTML 内容。
+    :param url: 目标 URL
+    :param port: 可选，Chrome 浏览器端口号
+    :param mode: 可选，加载模式，例如 'normal' 或 'eager'
+    :param proxy: 可选，代理设置，例如 'http://127.0.0.1:7890'
+    :param wait_api: 可选，API 调用后执行的回调函数
+    :param wait_api_timeout: 可选，API 调用超时时间，默认 20 秒
+    :return: HTML 内容字符串
+    '''
+    from DrissionPage import Chromium, ChromiumOptions
+    co = ChromiumOptions()
+    if mode:
+        co.set_load_mode(mode)
+    if port:
+        co.set_local_port(port)
+    if proxy:
+        co.set_proxy(proxy)
+    if mode or port:
+        chrome = Chromium(addr_or_opts=co)
+    else:
+        chrome = Chromium()
+    new_tab = chrome.new_tab()
+    if wait_api:
+        new_tab.listen.start(wait_api)
+    new_tab.get(url)
+    if wait_api:
+        new_tab.listen.wait(wait_api,timeout=wait_api_timeout)
+    html = new_tab.html
+    new_tab.close()
+    return html
