@@ -19,18 +19,23 @@ class SingletonChromium(Chromium):
     ...
 
 # TODO new_tab方法如果浏览器关了的话会报错，error，disconnect
-
-def save_page(url,path=None,name=None,as_pdf=False):
+def save_page(url,path=None,name=None,as_pdf=False,headless=True):
+    """使用 DrissionPage 保存网页或 PDF，并在结束后释放浏览器资源。"""
     from DrissionPage import Chromium,ChromiumOptions
     co=ChromiumOptions()
-    co.headless()
+    if headless:
+        co.headless()
     chrome = Chromium(addr_or_opts=co)
     new_tab=chrome.new_tab()
     new_tab.get(url)
-    new_tab.save(path=path,name=name,as_pdf=as_pdf)
-
-
-
+    try:
+        new_tab.get(url)
+        return new_tab.save(path=path, name=name, as_pdf=as_pdf)
+    finally:
+        try:
+            new_tab.close()
+        except Exception:
+            pass
 
 def download_page(url, save_path, rename, page_session=None):
     """下载网页资源，html 页面保存为 html 文件，pdf 页面保存为 PDF 文件。
