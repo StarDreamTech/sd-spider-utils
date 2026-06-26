@@ -17,7 +17,7 @@ twine upload dist/*
 # 打标签之后自动发布
 # 改 pyproject.toml: version = "1.0.3"
 git add .
-git commit -m "release 1.0.5"
-git tag v1.0.5
+git commit -m "release 1.0.6"
+git tag v1.0.6
 git push origin main --tags
 ```
