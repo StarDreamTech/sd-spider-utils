@@ -3,6 +3,8 @@ from urllib.parse import urlsplit, urlunsplit
 from scrapy.http import HtmlResponse
 from twisted.internet.threads import deferToThread
 
+from sd_spider_utils.dp_utils import SingletonChromium
+
 
 def _mask_proxy_url(proxy_url: str) -> str:
     """脱敏代理地址，避免日志泄露账户密码。"""
@@ -16,6 +18,127 @@ def _mask_proxy_url(proxy_url: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
+def _build_chromium_options(proxy=None):
+    from DrissionPage import ChromiumOptions
+
+    co = ChromiumOptions()
+    if proxy:
+        co.set_proxy(proxy)
+    return co
+
+
+def _new_chromium_tab(proxy=None):
+    if getattr(SingletonChromium, "_proxy", None) != proxy:
+        SingletonChromium.reset_instance()
+        SingletonChromium._proxy = proxy
+
+    co = _build_chromium_options(proxy)
+    chrome = SingletonChromium.get_instance(co)
+    try:
+        return chrome, chrome.new_tab()
+    except Exception:
+        # 浏览器被手动关闭或连接断开时，重建单例后再开新标签页。
+        SingletonChromium.reset_instance()
+        chrome = SingletonChromium.get_instance(co)
+        return chrome, chrome.new_tab()
+
+
+def _close_tab(tab):
+    if not tab:
+        return
+    try:
+        tab.close()
+    except Exception:
+        pass
+
+
+def _html_response(request, body, status=200):
+    if not isinstance(body, bytes):
+        body = str(body).encode("utf-8")
+
+    return HtmlResponse(
+        request.url,
+        status=status,
+        body=body,
+        encoding="utf-8",
+        request=request,
+    )
+
+
+class DrissionPageMiddleware:
+    """使用 DrissionPage 渲染普通页面，返回浏览器执行后的 HTML。"""
+
+    def process_request(self, request, spider):
+        meta = request.meta
+        use_dp = meta.get("use_dp")
+        listen_path = meta.get("listen_path")
+        proxy = meta.get("proxy")
+        timeout = meta.get("timeout", 30)
+
+        if not use_dp or listen_path:
+            return None
+        print("use dp middleware")
+
+        return deferToThread(self._process_request, request, proxy, timeout)
+
+    def _process_request(self, request, proxy, timeout):
+        new_tab = None
+        try:
+            _, new_tab = _new_chromium_tab(proxy)
+            new_tab.get(request.url, timeout=timeout)
+            return _html_response(request, new_tab.html)
+        finally:
+            _close_tab(new_tab)
+
+
+class DrissionPageListenAPIMiddleware:
+    """使用 DrissionPage 监听接口，优先返回匹配接口的数据包内容。"""
+
+    def process_request(self, request, spider):
+        meta = request.meta
+        use_dp = meta.get("use_dp")
+        listen_path = meta.get("listen_path")
+        proxy = meta.get("proxy")
+        timeout = meta.get("timeout", 30)
+        download_timeout = meta.get("download_timeout", 30)
+
+        if not use_dp or not listen_path:
+            return None
+
+        print("use dp listen_api middleware")
+
+        return deferToThread(
+            self._process_request,
+            request,
+            proxy,
+            timeout,
+            listen_path,
+            download_timeout,
+        )
+
+    def _process_request(self, request, proxy, timeout, listen_path, download_timeout):
+        import json
+
+        new_tab = None
+        try:
+            _, new_tab = _new_chromium_tab(proxy)
+            new_tab.listen.start(listen_path)  # 指定要匹配的接口路径或关键文本。
+            new_tab.get(request.url, timeout=timeout)
+
+            res = new_tab.listen.wait(timeout=download_timeout)
+            if res and not isinstance(res, bool) and res.response:
+                body = res.response.body
+                status = res.response.status
+                if isinstance(body, (dict, list)):
+                    body = json.dumps(body, ensure_ascii=False)
+                return _html_response(request, body, status=status)
+
+            # 监听超时或没有匹配包时，回退到页面 HTML，方便 spider 继续解析。
+            return _html_response(request, new_tab.html)
+        finally:
+            _close_tab(new_tab)
+
+
 class RequestsGoMMiddleware:
     def __init__(self) -> None:
         super().__init__()
@@ -26,7 +149,7 @@ class RequestsGoMMiddleware:
     def _process_request(self, request, spider):
         import requests_go as requests
 
-        print("go requests")
+        print("use go_requests middleware")
 
         proxies = None
         if request.meta.get("proxy"):

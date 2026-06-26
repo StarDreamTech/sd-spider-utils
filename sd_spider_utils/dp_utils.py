@@ -12,6 +12,19 @@ def singleton(cls):
                     instances[cls] = cls(*args, **kwargs)
         return instances[cls]
 
+    def reset_instance():
+        instance = None
+        with lock:
+            instance = instances.pop(cls, None)
+        if instance:
+            try:
+                instance.quit()
+            except Exception:
+                pass
+
+    get_instance.get_instance = get_instance
+    get_instance.reset_instance = reset_instance
+
     return get_instance
 
 @singleton
