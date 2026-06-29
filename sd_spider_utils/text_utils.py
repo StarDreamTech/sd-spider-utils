@@ -1,5 +1,6 @@
 import re
 
+
 def normalize_text(text):
     """
     文本标准化：转换为标准形式，并处理特殊字符。
@@ -16,15 +17,16 @@ def normalize_text(text):
     # Unicode 标准化
     text = unicodedata.normalize("NFKC", text)
     # 移除多余的空格（多个空格替换为一个空格）
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r"\s+", " ", text)
     # 去除首尾空格
     text = text.strip()
     return text
 
+
 def normalize_obj(obj):
-    '''
+    """
     递归标准化所有文本字段
-    '''
+    """
     if isinstance(obj, dict):
         return {k: normalize_obj(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -33,6 +35,7 @@ def normalize_obj(obj):
         return normalize_text(obj)
     else:
         return obj
+
 
 def clean_text(text: str):
     # 替换非断空白符为普通空格

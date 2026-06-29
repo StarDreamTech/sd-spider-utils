@@ -12,6 +12,19 @@ sd_spider_utils
 
     pip install sd_spider_utils
 
+Scrapy 中间件按需安装：
+
+::
+
+    pip install "sd_spider_utils[all]"
+
+只使用某一个下载后端时，也可以安装 ``scrapy``、``requests-go``、
+``drissionpage`` 或 ``scrapling`` extra。Scrapling 首次使用还需要执行：
+
+::
+
+    scrapling install
+
 使用示例
 --------
 
@@ -22,6 +35,52 @@ sd_spider_utils
     text = "Ｃａｆé['S.\u2009M. Koksbang\xa0', 'S.\u2009M. Koksbang']"  # 包含全角字符和组合字符
     clean_text = normalize_text(text)
     print(clean_text)
+
+Scrapy 下载中间件
+-----------------
+
+推荐只注册统一路由中间件：
+
+::
+
+    DOWNLOADER_MIDDLEWARES = {
+        "sd_spider_utils.middlewares.BackendRouterMiddleware": 950,
+    }
+
+    yield scrapy.Request(
+        url,
+        meta={"download_backend": "requests_go"},
+    )
+
+可选后端为 ``scrapy``、``requests_go``、``drission``、
+``drission_listen`` 和 ``scrapling``。需要按失败结果逐级切换时：
+
+::
+
+    yield scrapy.Request(
+        url,
+        meta={
+            "backend_fallbacks": ["scrapy", "requests_go", "scrapling"],
+            "solve_cloudflare": True,
+        },
+    )
+
+旧的 ``use_dp``、``listen_path``、``use_scrapling`` 标记仍然支持。
+``RequestsGoMMiddleware`` 现在需要显式设置
+``download_backend="requests_go"`` 或 ``use_requests_go=True``，不会再拦截全部请求。
+
+静态代理或代理池可在路由中间件之前注册：
+
+::
+
+    DOWNLOADER_MIDDLEWARES = {
+        "sd_spider_utils.middlewares.ProxyPoolMiddleware": 740,
+        "sd_spider_utils.middlewares.BackendRouterMiddleware": 950,
+    }
+    SD_PROXY_URL = "http://127.0.0.1:7890"
+
+动态代理提供器通过 ``SD_PROXY_PROVIDER`` 配置。提供器可实现
+``get_proxy()``、``report_response()`` 和 ``report_exception()``。
 
 功能特性
 --------

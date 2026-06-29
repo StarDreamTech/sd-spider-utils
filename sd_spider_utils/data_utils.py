@@ -1,5 +1,3 @@
-
-
 def load_json_data(filepath):
     """
     读取 json / jsonl / jl 文件，统一返回列表数据。
@@ -131,6 +129,7 @@ def json2excel(
         drop_duplicates_subset=drop_duplicates_subset,
         exclude_columns=exclude_columns,
     )
+
 
 if __name__ == "__main__":
     print(1)

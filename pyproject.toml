@@ -8,8 +8,11 @@ authors = [
     { name = "星梦", email = "cpython666@gmail.com" },
 ]
 urls = { Homepage = "https://space.bilibili.com/1909782963" }
-requires-python = ">=3.5"
-dependencies = ["requests", "beautifulsoup4"]
+requires-python = ">=3.10"
+dependencies = [
+    "beautifulsoup4>=4.12,<5",
+    "requests>=2.31,<3",
+]
 
 classifiers = [
     "Intended Audience :: Developers",
@@ -17,11 +20,31 @@ classifiers = [
     "Natural Language :: Chinese (Simplified)",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.5",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries",
+]
+
+[project.optional-dependencies]
+scrapy = ["Scrapy>=2.16,<3"]
+drissionpage = [
+    "Scrapy>=2.16,<3",
+    "DrissionPage>=4.1.1.4,<5",
+]
+requests-go = [
+    "Scrapy>=2.16,<3",
+    "requests-go>=1.0.9,<2",
+]
+scrapling = [
+    "Scrapy>=2.16,<3",
+    "scrapling[fetchers]>=0.4.9,<0.5",
+]
+all = [
+    "Scrapy>=2.16,<3",
+    "DrissionPage>=4.1.1.4,<5",
+    "requests-go>=1.0.9,<2",
+    "scrapling[fetchers]>=0.4.9,<0.5",
 ]
 
 [build-system]
