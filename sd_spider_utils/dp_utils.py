@@ -85,6 +85,7 @@ def save_page(url, path=None, name=None, as_pdf=False, headless=True):
             except Exception:
                 pass
         try:
+            # TODO 每次都关闭浏览器，很消耗资源，可以写个定时器
             chrome.quit()
         except Exception:
             pass
