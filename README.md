@@ -49,8 +49,6 @@ data = normalize_obj({"标题": " Ａ  \n B "})
 dates = extract_dates("发布于 2026年6月30日")
 ```
 
-`remove_extra_blank_spaces` 是 `remove_extra_spaces` 的兼容别名。
-
 ### requests-go 请求
 
 ```python

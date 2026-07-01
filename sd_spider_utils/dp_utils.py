@@ -6,7 +6,7 @@ def singleton(cls):
     """把类包装成线程安全、可重置的单例构造器。
 
     :param cls: 需要包装的类
-    :return: 带 get_instance 和 reset_instance 属性的构造器
+    :return: 带 reset_instance 属性的单例构造器
     """
     instance = None
     lock = threading.Lock()
@@ -29,7 +29,6 @@ def singleton(cls):
             except Exception:
                 pass
 
-    get_instance.get_instance = get_instance
     get_instance.reset_instance = reset_instance
     return get_instance
 

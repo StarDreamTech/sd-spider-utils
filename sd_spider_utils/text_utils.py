@@ -47,10 +47,6 @@ def remove_extra_spaces(text: str) -> str:
     return " ".join(text.split())
 
 
-# 兼容旧名称；两者原本行为相同。
-remove_extra_blank_spaces = remove_extra_spaces
-
-
 def contains_chinese(text: str) -> bool:
     """判断文本是否包含汉字。
 

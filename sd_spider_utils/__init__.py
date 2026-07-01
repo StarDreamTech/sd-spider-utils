@@ -13,14 +13,8 @@ from .text_utils import (
     contains_date,
     normalize_obj,
     normalize_text,
-    remove_extra_blank_spaces,
     remove_extra_spaces,
 )
-
-# 兼容旧版包级名称，实际实现只保留一份。
-datetime_clean_text = clean_text
-datetime_contains_chinese = contains_chinese
-datetime_contains_date = contains_date
 
 _LAZY_EXPORTS = {
     name: (".dp_utils", name)
@@ -61,9 +55,6 @@ __all__ = [
     "contains_chinese",
     "contains_date",
     "data2excel",
-    "datetime_clean_text",
-    "datetime_contains_chinese",
-    "datetime_contains_date",
     "download_page",
     "extract_dates",
     "get_browser",
@@ -75,7 +66,6 @@ __all__ = [
     "load_json_data",
     "normalize_obj",
     "normalize_text",
-    "remove_extra_blank_spaces",
     "remove_extra_spaces",
     "request_with_requests_go",
     "save_page",

@@ -1,8 +1,6 @@
 import re
 from datetime import datetime
 
-from .text_utils import clean_text, contains_chinese, contains_date
-
 _DATE_PARTS_RE = re.compile(
     r"(?P<year>\d{4})[-/年](?P<month>\d{1,2})[-/月](?P<day>\d{1,2})日?"
 )
@@ -27,6 +25,3 @@ def extract_dates(text: str) -> list[datetime]:
         except ValueError:
             continue
     return dates
-
-
-__all__ = ["clean_text", "contains_chinese", "contains_date", "extract_dates"]
