@@ -130,13 +130,6 @@ yield scrapy.Request(
 )
 ```
 
-显式配置 `backend_fallbacks` 后，403、429、503 或常见 Cloudflare
-挑战页会切换到下一个后端：
-
-```python
-meta={"backend_fallbacks": ["scrapy", "requests_go", "scrapling"]}
-```
-
 `TunnelProxyMiddleware` 可读取 `SD_PROXY_URL` 设置静态代理；动态代理直接写入
 `request.meta["proxy"]`，由 Scrapy 内置代理中间件处理。
 
@@ -149,7 +142,6 @@ meta={"backend_fallbacks": ["scrapy", "requests_go", "scrapling"]}
 | `SD_DRISSION_LOAD_MODE` | 空 | DrissionPage 加载模式 |
 | `SD_REQUESTS_GO_VERIFY` | `True` | requests-go 是否校验证书 |
 | `SD_SCRAPLING_HEADLESS` | `True` | Scrapling 是否无头运行 |
-| `SD_SCRAPLING_SESSION_OPTIONS` | `{}` | Scrapling Session 参数 |
 
 ## 开发检查
 

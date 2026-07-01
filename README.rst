@@ -53,17 +53,7 @@ Scrapy 下载中间件
     )
 
 可选后端为 ``scrapy``、``requests_go``、``dp``、
-``dp_listen`` 和 ``scrapling``。需要按失败结果逐级切换时：
-
-::
-
-    yield scrapy.Request(
-        url,
-        meta={
-            "backend_fallbacks": ["scrapy", "requests_go", "scrapling"],
-            "solve_cloudflare": True,
-        },
-    )
+``dp_listen`` 和 ``scrapling``。
 
 监听接口时使用 ``download_backend="dp_listen"``，并通过
 ``listen_path`` 设置需要等待的接口路径。
