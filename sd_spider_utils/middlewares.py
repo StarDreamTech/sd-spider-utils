@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 BACKEND_META_KEY = "download_backend"
 SUPPORTED_BACKENDS = {"scrapy", "requests_go", "dp", "dp_listen", "scrapling"}
 _BROWSER_BACKENDS = {"dp", "dp_listen", "scrapling"}
+# 重新包装 HtmlResponse 时移除可能失真的传输类响应头。
 _DROP_RESPONSE_HEADERS = {"content-encoding", "content-length", "transfer-encoding"}
 
 
