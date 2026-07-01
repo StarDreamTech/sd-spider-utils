@@ -1,7 +1,8 @@
 import sys
+import types
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scrapy.exceptions import NotSupported
 from scrapy.http import Request
@@ -107,6 +108,57 @@ class MiddlewareTests(unittest.TestCase):
                 Request("https://example.com"),
                 20,
             )
+
+    def test_dp_browser_uses_dp_utils_manager(self):
+        created_options = []
+
+        class FakeOptions:
+            def auto_port(self):
+                return self
+
+            def headless(self, value=True):
+                self.headless = value
+                return self
+
+            def set_load_mode(self, value):
+                self.load_mode = value
+
+            def set_proxy(self, value):
+                self.proxy = value
+
+        def fake_get_browser(browser_type, options):
+            created_options.append((browser_type, options))
+            return object()
+
+        chromium_module = types.SimpleNamespace(ChromiumOptions=FakeOptions)
+        dp_utils = types.SimpleNamespace(
+            get_browser=fake_get_browser,
+            close_browser=Mock(),
+        )
+        middleware = BackendRouterMiddleware(
+            DummyCrawler({"SD_DRISSION_HEADLESS": False, "SD_DRISSION_LOAD_MODE": "eager"})
+        )
+        request = Request(
+            "https://example.com",
+            meta={"proxy": "http://127.0.0.1:7890"},
+        )
+
+        with patch.dict(
+            sys.modules,
+            {
+                "DrissionPage": chromium_module,
+                "sd_spider_utils.dp_utils": dp_utils,
+            },
+        ):
+            self.assertIsNotNone(middleware._get_browser(request))
+            middleware._close_browsers()
+
+        browser_type, options = created_options[0]
+        self.assertIn("http://127.0.0.1:7890", browser_type)
+        self.assertFalse(options.headless)
+        self.assertEqual(options.load_mode, "eager")
+        self.assertEqual(options.proxy, "http://127.0.0.1:7890")
+        dp_utils.close_browser.assert_called_once_with(browser_type)
 
     def test_static_proxy_keeps_request_proxy(self):
         middleware = TunnelProxyMiddleware("http://default:8080")

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 
 from scrapy import signals
 from scrapy.exceptions import NotConfigured, NotSupported
@@ -114,8 +113,7 @@ class BackendRouterMiddleware:
     def __init__(self, crawler):
         self.settings = crawler.settings
         self.timeout = self.settings.getfloat("DOWNLOAD_TIMEOUT", 10)
-        self._browsers = {}
-        self._browser_lock = threading.Lock()
+        self._browser_types = set()
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -168,33 +166,29 @@ class BackendRouterMiddleware:
         )
 
     def _get_browser(self, request: Request):
-        """按代理地址复用一个 DrissionPage 浏览器。"""
+        """按代理和配置复用 dp_utils 中的单例浏览器。"""
+        from DrissionPage import ChromiumOptions
+
+        from .dp_utils import get_browser
+
         proxy = request.meta.get("proxy") or ""
-        with self._browser_lock:
-            if proxy not in self._browsers:
-                from DrissionPage import Chromium, ChromiumOptions
+        headless = self.settings.getbool("SD_DRISSION_HEADLESS", True)
+        load_mode = self.settings.get("SD_DRISSION_LOAD_MODE") or ""
+        browser_type = f"scrapy-dp:{proxy or 'direct'}:{headless}:{load_mode}"
 
-                options = ChromiumOptions().auto_port().headless(
-                    self.settings.getbool("SD_DRISSION_HEADLESS", True)
-                )
-                if load_mode := self.settings.get("SD_DRISSION_LOAD_MODE"):
-                    options.set_load_mode(load_mode)
-                if proxy:
-                    options.set_proxy(proxy)
-                self._browsers[proxy] = Chromium(options)
-            return self._browsers[proxy]
+        options = ChromiumOptions().auto_port().headless(headless)
+        if load_mode:
+            options.set_load_mode(load_mode)
+        if proxy:
+            options.set_proxy(proxy)
 
-    @staticmethod
-    def _prepare_tab(tab, request: Request):
-        """把 Scrapy 请求头设置到浏览器标签页。"""
-        if headers := _request_headers(request):
-            tab.set.headers(headers)
+        self._browser_types.add(browser_type)
+        return get_browser(browser_type, options)
 
     def _download_dp(self, request: Request, timeout: float):
         """使用 DrissionPage 获取渲染后的页面。"""
         tab = self._get_browser(request).new_tab()
         try:
-            self._prepare_tab(tab, request)
             tab.get(request.url, timeout=timeout)
             return _build_response(request, tab.html, url=tab.url, backend="dp")
         finally:
@@ -208,7 +202,6 @@ class BackendRouterMiddleware:
 
         tab = self._get_browser(request).new_tab()
         try:
-            self._prepare_tab(tab, request)
             tab.listen.start(listen_path)
             tab.get(request.url, timeout=timeout)
             packet = tab.listen.wait(timeout=timeout, raise_err=False)
@@ -259,11 +252,12 @@ class BackendRouterMiddleware:
         return deferToThread(self._close_browsers)
 
     def _close_browsers(self):
-        with self._browser_lock:
-            browsers, self._browsers = list(self._browsers.values()), {}
-        for browser in browsers:
+        from .dp_utils import close_browser
+
+        browser_types, self._browser_types = self._browser_types, set()
+        for browser_type in browser_types:
             try:
-                browser.quit()
+                close_browser(browser_type)
             except Exception:
                 logger.debug("关闭浏览器失败", exc_info=True)
 
