@@ -112,7 +112,7 @@ class BackendRouterMiddleware:
 
     def __init__(self, crawler):
         self.settings = crawler.settings
-        self.timeout = self.settings.getfloat("DOWNLOAD_TIMEOUT", 30)
+        self.timeout = self.settings.getfloat("DOWNLOAD_TIMEOUT", 10)
         self._browsers = {}
         self._browser_lock = threading.Lock()
 
