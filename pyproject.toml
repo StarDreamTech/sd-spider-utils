@@ -1,6 +1,6 @@
 [project]
 name = "sd_spider_utils"
-version = "1.0.6"
+version = "1.0.7"
 description = "爬虫工具包，写爬虫更快！！！"
 readme = "README.rst"
 license = { file = "LICENSE" }
