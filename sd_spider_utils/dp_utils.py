@@ -1,159 +1,204 @@
 import threading
+from pathlib import Path
 
 
 def singleton(cls):
-    instances = {}
+    """把类包装成线程安全、可重置的单例构造器。
+
+    :param cls: 需要包装的类
+    :return: 带 get_instance 和 reset_instance 属性的构造器
+    """
+    instance = None
     lock = threading.Lock()
 
     def get_instance(*args, **kwargs):
-        if cls not in instances:
+        nonlocal instance
+        if instance is None:
             with lock:
-                if cls not in instances:
-                    instances[cls] = cls(*args, **kwargs)
-        return instances[cls]
+                if instance is None:
+                    instance = cls(*args, **kwargs)
+        return instance
 
     def reset_instance():
-        instance = None
+        nonlocal instance
         with lock:
-            instance = instances.pop(cls, None)
-        if instance:
+            current, instance = instance, None
+        if current and hasattr(current, "quit"):
             try:
-                instance.quit()
+                current.quit()
             except Exception:
                 pass
 
     get_instance.get_instance = get_instance
     get_instance.reset_instance = reset_instance
-
     return get_instance
 
 
-_chromium_instance = None
-_chromium_lock = threading.Lock()
+class BrowserManager:
+    """按类型维护 Chromium 实例，同一类型只创建一个浏览器。"""
+
+    def __init__(self):
+        self._browsers = {}
+        self._lock = threading.Lock()
+
+    def get(self, browser_type="default", browser_options=None, headless=True):
+        """获取指定类型的浏览器，不存在时按当前配置创建。
+
+        :param browser_type: 浏览器类型，也是单例实例的唯一标识
+        :param browser_options: DrissionPage ChromiumOptions 配置
+        :param headless: 未传 browser_options 时是否使用无头模式
+        :return: 指定类型的 Chromium 实例
+        """
+        with self._lock:
+            if browser_type not in self._browsers:
+                from DrissionPage import Chromium, ChromiumOptions
+
+                options = (
+                    browser_options
+                    if browser_options is not None
+                    else ChromiumOptions().headless(headless).auto_port()
+                )
+                self._browsers[browser_type] = Chromium(options)
+            return self._browsers[browser_type]
+
+    def close(self, browser_type="default"):
+        """关闭并移除指定类型的浏览器。
+
+        :param browser_type: 要关闭的浏览器类型
+        :return: 找到并关闭浏览器时返回 True
+        """
+        with self._lock:
+            browser = self._browsers.pop(browser_type, None)
+        if browser is None:
+            return False
+        browser.quit()
+        return True
+
+    def close_all(self):
+        """关闭并移除全部浏览器实例。"""
+        with self._lock:
+            browsers, self._browsers = list(self._browsers.values()), {}
+        for browser in browsers:
+            browser.quit()
 
 
-def _get_chromium_instance(*args, **kwargs):
-    """延迟导入 DrissionPage，避免基础工具包被可选依赖绑死。"""
-    global _chromium_instance
-
-    if _chromium_instance is None:
-        with _chromium_lock:
-            if _chromium_instance is None:
-                from DrissionPage import Chromium
-
-                _chromium_instance = Chromium(*args, **kwargs)
-    return _chromium_instance
+browser_manager = BrowserManager()
 
 
-def _reset_chromium_instance():
-    global _chromium_instance
+def get_browser(browser_type="default", browser_options=None, headless=True):
+    """获取按类型复用的 Chromium 浏览器。
 
-    with _chromium_lock:
-        instance = _chromium_instance
-        _chromium_instance = None
-    if instance:
-        try:
-            instance.quit()
-        except Exception:
-            pass
+    :param browser_type: 浏览器类型，也是单例实例的唯一标识
+    :param browser_options: 首次创建该类型时使用的 ChromiumOptions
+    :param headless: 未传 browser_options 时是否使用无头模式
+    :return: 指定类型的 Chromium 实例
+    """
+    return browser_manager.get(browser_type, browser_options, headless)
 
 
-# 保留旧版可调用对象及其 get_instance/reset_instance 属性。
-SingletonChromium = _get_chromium_instance
-SingletonChromium.get_instance = _get_chromium_instance
-SingletonChromium.reset_instance = _reset_chromium_instance
+def close_browser(browser_type="default"):
+    """关闭指定类型的浏览器。
+
+    :param browser_type: 要关闭的浏览器类型
+    :return: 找到并关闭浏览器时返回 True
+    """
+    return browser_manager.close(browser_type)
 
 
-# TODO new_tab方法如果浏览器关了的话会报错，error，disconnect
-def save_page(url, path=None, name=None, as_pdf=False, headless=True):
-    """使用 DrissionPage 保存网页或 PDF，并在结束后释放浏览器资源。"""
-    from DrissionPage import Chromium, ChromiumOptions
+def close_all_browsers():
+    """关闭全部由 BrowserManager 创建的浏览器。"""
+    browser_manager.close_all()
 
-    co = ChromiumOptions()
-    if headless:
-        co.headless()
-    chrome = Chromium(addr_or_opts=co)
-    new_tab = None
+
+def save_page(
+    url,
+    path=None,
+    name=None,
+    as_pdf=False,
+    headless=True,
+    browser_type="default",
+    browser_options=None,
+):
+    """使用指定类型的单例浏览器保存网页或 PDF。
+
+    :param url: 目标网页地址
+    :param path: 保存目录
+    :param name: 保存文件名
+    :param as_pdf: 是否保存为 PDF
+    :param headless: 是否使用无头浏览器
+    :param browser_type: 浏览器类型；同一类型复用同一个实例
+    :param browser_options: 首次创建该类型时使用的 ChromiumOptions
+    :return: DrissionPage 的保存结果
+    """
+    browser = get_browser(browser_type, browser_options, headless)
+    tab = browser.new_tab()
     try:
-        new_tab = chrome.new_tab()
-        new_tab.get(url)
-        return new_tab.save(path=path, name=name, as_pdf=as_pdf)
+        tab.get(url)
+        return tab.save(path=path, name=name, as_pdf=as_pdf)
     finally:
-        if new_tab:
-            try:
-                new_tab.close()
-            except Exception:
-                pass
-        try:
-            # TODO 每次都关闭浏览器，很消耗资源，可以写个定时器
-            chrome.quit()
-        except Exception:
-            pass
+        tab.close()
 
 
 def download_page(url, save_path, rename, page_session=None):
-    """下载网页资源，html 页面保存为 html 文件，pdf 页面保存为 PDF 文件。
+    """下载网页资源；目标文件已存在时直接跳过。
 
-    :param url: 资源下载链接
-    :param save_path: 本地保存目录路径，例如 'downloads' 或 './'
-    :param rename: 重命名后的文件名，例如 'report.pdf'
-    :param page_session: 可选，传入已实例化的 SessionPage 对象；不传则函数内自动实例化
+    :param url: 资源地址
+    :param save_path: 保存目录
+    :param rename: 保存文件名
+    :param page_session: 可复用的 DrissionPage SessionPage
+    :return: DrissionPage 的下载结果；文件已存在时返回 None
     """
-    # 组合完整文件路径，用于检查文件是否已存在
-    import os
+    target = Path(save_path) / rename
+    if target.exists():
+        return None
 
-    file_path = os.path.join(save_path, rename)
+    if page_session is None:
+        from DrissionPage import SessionPage
 
-    # 检查文件是否已存在
-    if os.path.exists(file_path):
-        print(f"文件已存在，跳过下载：{file_path}")
-        return
-    from DrissionPage import SessionPage
-
-    # 初始化或复用传入的 SessionPage
-    page_ = page_session if page_session else SessionPage()
-
-    # 执行下载
-    try:
-        # 直接使用传入的保存目录和文件名
-        res = page_.download(url, save_path=save_path, rename=rename)
-        print(f"下载完成：{rename}，结果：{res}")
-    except Exception as e:
-        print(f"下载失败：{rename}，错误：{e}")
+        page_session = SessionPage()
+    return page_session.download(
+        url,
+        save_path=str(target.parent),
+        rename=target.name,
+    )
 
 
 def get_html_from_chrome(
-    url, port=None, mode=None, proxy=None, wait_api=None, wait_api_timeout=20
+    url,
+    port=None,
+    mode=None,
+    proxy=None,
+    wait_api=None,
+    wait_api_timeout=20,
 ):
-    """
-    从 Chrome 浏览器获取 HTML 内容。
-    :param url: 目标 URL
-    :param port: 可选，Chrome 浏览器端口号
-    :param mode: 可选，加载模式，例如 'normal' 或 'eager'
-    :param proxy: 可选，代理设置，例如 'http://127.0.0.1:7890'
-    :param wait_api: 可选，API 调用后执行的回调函数
-    :param wait_api_timeout: 可选，API 调用超时时间，默认 20 秒
-    :return: HTML 内容字符串
+    """获取浏览器渲染后的 HTML，可等待指定网络请求完成。
+
+    :param url: 目标网页地址
+    :param port: 可选的 Chrome 调试端口
+    :param mode: 页面加载模式，例如 normal、eager 或 none
+    :param proxy: 代理地址
+    :param wait_api: 需要等待的接口路径或关键字
+    :param wait_api_timeout: 等待接口的超时秒数
+    :return: 浏览器渲染后的 HTML
     """
     from DrissionPage import Chromium, ChromiumOptions
 
-    co = ChromiumOptions()
+    options = ChromiumOptions()
     if mode:
-        co.set_load_mode(mode)
+        options.set_load_mode(mode)
     if port:
-        co.set_local_port(port)
+        options.set_local_port(port)
     if proxy:
-        co.set_proxy(proxy)
-    if mode or port:
-        chrome = Chromium(addr_or_opts=co)
-    else:
-        chrome = Chromium()
-    new_tab = chrome.new_tab()
-    if wait_api:
-        new_tab.listen.start(wait_api)
-    new_tab.get(url)
-    if wait_api:
-        new_tab.listen.wait(timeout=wait_api_timeout)
-    html = new_tab.html
-    new_tab.close()
-    return html
+        options.set_proxy(proxy)
+
+    browser = Chromium(options) if mode or port or proxy else Chromium()
+    tab = browser.new_tab()
+    try:
+        if wait_api:
+            tab.listen.start(wait_api)
+        tab.get(url)
+        if wait_api:
+            tab.listen.wait(timeout=wait_api_timeout)
+        return tab.html
+    finally:
+        tab.close()
