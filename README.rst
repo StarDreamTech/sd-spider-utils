@@ -68,6 +68,9 @@ Scrapy 下载中间件
     }
     SD_PROXY_URL = "http://127.0.0.1:7890"
 
+只有 ``request.meta["use_proxy"]`` 为真时才会补充 ``SD_PROXY_URL``；
+请求里已有 ``proxy`` 时不会覆盖。
+
 功能特性
 --------
 

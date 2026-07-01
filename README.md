@@ -130,8 +130,8 @@ yield scrapy.Request(
 )
 ```
 
-`TunnelProxyMiddleware` 可读取 `SD_PROXY_URL` 设置静态代理；动态代理直接写入
-`request.meta["proxy"]`，由 Scrapy 内置代理中间件处理。
+`TunnelProxyMiddleware` 只在 `request.meta["use_proxy"]` 为真时读取
+`SD_PROXY_URL` 设置静态代理；动态代理可直接写入 `request.meta["proxy"]`。
 
 常用设置：
 

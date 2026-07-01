@@ -269,7 +269,7 @@ class BackendRouterMiddleware:
 
 
 class TunnelProxyMiddleware:
-    """为未设置代理的请求补充 SD_PROXY_URL。"""
+    """请求显式启用代理时，补充 SD_PROXY_URL。"""
 
     def __init__(self, proxy_url: str):
         self.proxy_url = proxy_url
@@ -283,5 +283,7 @@ class TunnelProxyMiddleware:
         return cls(proxy_url)
 
     def process_request(self, request: Request, spider=None):
-        """保留请求自带代理，否则使用静态代理。"""
+        """use_proxy 为真时设置代理；已传 proxy 时不覆盖。"""
+        if not request.meta.get("use_proxy"):
+            return None
         request.meta.setdefault("proxy", self.proxy_url)

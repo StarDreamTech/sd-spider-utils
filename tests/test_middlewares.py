@@ -112,11 +112,15 @@ class MiddlewareTests(unittest.TestCase):
         middleware = TunnelProxyMiddleware("http://default:8080")
         request = Request("https://example.com")
         middleware.process_request(request)
+        self.assertNotIn("proxy", request.meta)
+
+        request = Request("https://example.com", meta={"use_proxy": True})
+        middleware.process_request(request)
         self.assertEqual(request.meta["proxy"], "http://default:8080")
 
         custom = Request(
             "https://example.com",
-            meta={"proxy": "http://custom:8080"},
+            meta={"use_proxy": True, "proxy": "http://custom:8080"},
         )
         middleware.process_request(custom)
         self.assertEqual(custom.meta["proxy"], "http://custom:8080")
