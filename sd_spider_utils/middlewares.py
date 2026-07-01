@@ -32,12 +32,6 @@ _SUPPORTED_BACKENDS = {
     "drission_listen",
     "scrapling",
 }
-_BACKEND_ALIASES = {
-    "dp": "drission",
-    "drissionpage": "drission",
-    "dp_listen": "drission_listen",
-    "go_requests": "requests_go",
-}
 _BROWSER_BACKENDS = {"drission", "drission_listen", "scrapling"}
 _FALLBACK_STATUSES = {403, 429, 503}
 _CHALLENGE_MARKERS = (
@@ -62,8 +56,7 @@ _DROP_RESPONSE_HEADERS = {
 def _normalize_backend(value: Any) -> str | None:
     if value is None:
         return None
-    backend = str(value).strip().lower().replace("-", "_")
-    backend = _BACKEND_ALIASES.get(backend, backend)
+    backend = str(value).strip().lower()
     if backend not in _SUPPORTED_BACKENDS:
         raise ValueError(f"不支持的下载后端：{value!r}")
     return backend
@@ -89,12 +82,6 @@ def _backend_for_request(request: Request) -> str | None:
     fallbacks = _fallback_backends(request)
     if fallbacks:
         return fallbacks[int(request.meta.get(_BACKEND_INDEX_META_KEY, 0))]
-    if request.meta.get("use_dp"):
-        return "drission_listen" if request.meta.get("listen_path") else "drission"
-    if request.meta.get("use_scrapling"):
-        return "scrapling"
-    if request.meta.get("use_requests_go") or request.meta.get("use_go_requests"):
-        return "requests_go"
     return None
 
 
@@ -277,8 +264,6 @@ class _DrissionBrowsers:
 class BackendRouterMiddleware:
     """根据 Request.meta 选择 requests-go、DrissionPage 或 Scrapling。"""
 
-    accepted_backends: frozenset[str] | None = None
-
     def __init__(self, crawler):
         self.crawler = crawler
         self.settings = crawler.settings
@@ -297,15 +282,10 @@ class BackendRouterMiddleware:
         crawler.signals.connect(middleware.spider_closed, signal=signals.spider_closed)
         return middleware
 
-    def _accepts(self, backend: str | None) -> bool:
-        if not backend:
-            return False
-        return self.accepted_backends is None or backend in self.accepted_backends
-
     def process_request(self, request: Request) -> Deferred | None:
         """把显式选择第三方后端的请求移交给对应下载器。"""
         backend = _backend_for_request(request)
-        if not self._accepts(backend) or backend == "scrapy":
+        if not backend or backend == "scrapy":
             return None
         if backend in _BROWSER_BACKENDS and request.method != "GET":
             raise NotSupported(f"{backend} 仅支持 GET 请求")
@@ -577,30 +557,6 @@ class BackendRouterMiddleware:
         return result
 
 
-class DrissionPageMiddleware(BackendRouterMiddleware):
-    """兼容旧配置，仅处理 DrissionPage 页面请求。"""
-
-    accepted_backends = frozenset({"drission"})
-
-
-class DrissionPageListenAPIMiddleware(BackendRouterMiddleware):
-    """兼容旧配置，仅处理 DrissionPage 接口监听请求。"""
-
-    accepted_backends = frozenset({"drission_listen"})
-
-
-class RequestsGoMMiddleware(BackendRouterMiddleware):
-    """兼容旧配置，仅处理显式选择 requests-go 的请求。"""
-
-    accepted_backends = frozenset({"requests_go"})
-
-
-class ScraplingMiddleware(BackendRouterMiddleware):
-    """兼容旧配置，仅处理显式选择 Scrapling 的请求。"""
-
-    accepted_backends = frozenset({"scrapling"})
-
-
 class TunnelProxyMiddleware:
     """为未设置代理的请求补充 SD_PROXY_URL 静态代理。"""
 
@@ -618,7 +574,3 @@ class TunnelProxyMiddleware:
     def process_request(self, request: Request) -> None:
         """保留请求自带代理，否则使用静态代理。"""
         request.meta.setdefault("proxy", self.proxy_url)
-
-
-# 兼容上一版名称；动态代理请直接在 request.meta["proxy"] 中设置。
-ProxyPoolMiddleware = TunnelProxyMiddleware

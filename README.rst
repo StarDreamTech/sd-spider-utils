@@ -65,16 +65,15 @@ Scrapy 下载中间件
         },
     )
 
-旧的 ``use_dp``、``listen_path``、``use_scrapling`` 标记仍然支持。
-``RequestsGoMMiddleware`` 现在需要显式设置
-``download_backend="requests_go"`` 或 ``use_requests_go=True``，不会再拦截全部请求。
+监听接口时使用 ``download_backend="drission_listen"``，并通过
+``listen_path`` 设置需要等待的接口路径。
 
-静态代理或代理池可在路由中间件之前注册：
+静态代理可在路由中间件之前注册：
 
 ::
 
     DOWNLOADER_MIDDLEWARES = {
-        "sd_spider_utils.middlewares.ProxyPoolMiddleware": 740,
+        "sd_spider_utils.middlewares.TunnelProxyMiddleware": 740,
         "sd_spider_utils.middlewares.BackendRouterMiddleware": 950,
     }
     SD_PROXY_URL = "http://127.0.0.1:7890"

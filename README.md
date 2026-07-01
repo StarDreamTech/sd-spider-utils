@@ -138,10 +138,6 @@ yield scrapy.Request(
 meta={"backend_fallbacks": ["scrapy", "requests_go", "scrapling"]}
 ```
 
-兼容类 `RequestsGoMMiddleware`、`DrissionPageMiddleware`、
-`DrissionPageListenAPIMiddleware`、`ScraplingMiddleware` 只处理各自后端。
-新项目无需同时注册它们。
-
 `TunnelProxyMiddleware` 可读取 `SD_PROXY_URL` 设置静态代理；动态代理直接写入
 `request.meta["proxy"]`，由 Scrapy 内置代理中间件处理。
 

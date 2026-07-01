@@ -11,7 +11,6 @@ from sd_spider_utils.middlewares import (
     BACKEND_FALLBACKS_META_KEY,
     BACKEND_META_KEY,
     BackendRouterMiddleware,
-    RequestsGoMMiddleware,
     TunnelProxyMiddleware,
     _backend_error,
     _backend_for_request,
@@ -33,23 +32,18 @@ class MiddlewareTests(unittest.TestCase):
             _backend_for_request(
                 Request(
                     "https://example.com",
-                    meta={BACKEND_META_KEY: "requests-go"},
+                    meta={BACKEND_META_KEY: "requests_go"},
                 )
             ),
             "requests_go",
         )
-        self.assertEqual(
+        with self.assertRaises(ValueError):
             _backend_for_request(
                 Request(
                     "https://example.com",
-                    meta={"use_dp": True, "listen_path": "/api"},
+                    meta={BACKEND_META_KEY: "requests-go"},
                 )
-            ),
-            "drission_listen",
-        )
-
-        middleware = RequestsGoMMiddleware(DummyCrawler())
-        self.assertIsNone(middleware.process_request(Request("https://example.com")))
+            )
 
     def test_browser_backends_reject_non_get(self):
         middleware = BackendRouterMiddleware(DummyCrawler())
