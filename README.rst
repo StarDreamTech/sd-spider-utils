@@ -52,8 +52,8 @@ Scrapy 下载中间件
         meta={"download_backend": "requests_go"},
     )
 
-可选后端为 ``scrapy``、``requests_go``、``drission``、
-``drission_listen`` 和 ``scrapling``。需要按失败结果逐级切换时：
+可选后端为 ``scrapy``、``requests_go``、``dp``、
+``dp_listen`` 和 ``scrapling``。需要按失败结果逐级切换时：
 
 ::
 
@@ -65,7 +65,7 @@ Scrapy 下载中间件
         },
     )
 
-监听接口时使用 ``download_backend="drission_listen"``，并通过
+监听接口时使用 ``download_backend="dp_listen"``，并通过
 ``listen_path`` 设置需要等待的接口路径。
 
 静态代理可在路由中间件之前注册：

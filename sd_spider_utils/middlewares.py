@@ -28,11 +28,11 @@ _BACKEND_INDEX_META_KEY = "_sd_backend_index"
 _SUPPORTED_BACKENDS = {
     "scrapy",
     "requests_go",
-    "drission",
-    "drission_listen",
+    "dp",
+    "dp_listen",
     "scrapling",
 }
-_BROWSER_BACKENDS = {"drission", "drission_listen", "scrapling"}
+_BROWSER_BACKENDS = {"dp", "dp_listen", "scrapling"}
 _FALLBACK_STATUSES = {403, 429, 503}
 _CHALLENGE_MARKERS = (
     b"<title>just a moment",
@@ -412,7 +412,7 @@ class BackendRouterMiddleware:
             packets[-1] if packets else None,
         )
 
-    def _download_drission(self, request: Request, timeout: float) -> Response:
+    def _download_dp(self, request: Request, timeout: float) -> Response:
         with self._tab(request) as tab:
             started = monotonic()
             tab.listen.start(targets=True, method="GET", res_type="Document")
@@ -426,7 +426,7 @@ class BackendRouterMiddleware:
             packet.wait_extra_info(timeout=0.2)
             return _scrapy_response(
                 request,
-                "drission",
+                "dp",
                 tab.url,
                 packet.response.status,
                 packet.response.headers,
@@ -434,14 +434,14 @@ class BackendRouterMiddleware:
                 tab.cookies(all_domains=False, all_info=True),
             )
 
-    def _download_drission_listen(
+    def _download_dp_listen(
         self,
         request: Request,
         timeout: float,
     ) -> Response:
         target = request.meta.get("listen_path")
         if not target:
-            raise ValueError("drission_listen 必须设置 listen_path")
+            raise ValueError("dp_listen 必须设置 listen_path")
         with self._tab(request) as tab:
             started = monotonic()
             tab.listen.start(target)
@@ -457,7 +457,7 @@ class BackendRouterMiddleware:
             packet.wait_extra_info(timeout=0.2)
             return _scrapy_response(
                 request,
-                "drission_listen",
+                "dp_listen",
                 packet.url,
                 packet.response.status,
                 packet.response.headers,

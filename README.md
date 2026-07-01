@@ -117,14 +117,14 @@ yield scrapy.Request(
 )
 ```
 
-支持 `scrapy`、`requests_go`、`drission`、`drission_listen` 和 `scrapling`。
+支持 `scrapy`、`requests_go`、`dp`、`dp_listen` 和 `scrapling`。
 监听接口时还需传入 `listen_path`：
 
 ```python
 yield scrapy.Request(
     url,
     meta={
-        "download_backend": "drission_listen",
+        "download_backend": "dp_listen",
         "listen_path": "/api/list",
     },
 )

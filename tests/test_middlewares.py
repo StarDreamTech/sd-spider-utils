@@ -28,15 +28,12 @@ class DummyCrawler:
 class MiddlewareTests(unittest.TestCase):
     def test_backend_selection_is_explicit(self):
         self.assertIsNone(_backend_for_request(Request("https://example.com")))
-        self.assertEqual(
-            _backend_for_request(
-                Request(
-                    "https://example.com",
-                    meta={BACKEND_META_KEY: "requests_go"},
-                )
-            ),
-            "requests_go",
-        )
+        for backend in ("scrapy", "requests_go", "dp", "dp_listen", "scrapling"):
+            request = Request(
+                "https://example.com",
+                meta={BACKEND_META_KEY: backend},
+            )
+            self.assertEqual(_backend_for_request(request), backend)
         with self.assertRaises(ValueError):
             _backend_for_request(
                 Request(
@@ -80,7 +77,7 @@ class MiddlewareTests(unittest.TestCase):
 
         rendered = _scrapy_response(
             request,
-            "drission",
+            "dp",
             request.url,
             200,
             {"Content-Type": "text/html; charset=gbk"},
