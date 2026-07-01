@@ -11,7 +11,6 @@ urls = { Homepage = "https://space.bilibili.com/1909782963" }
 requires-python = ">=3.10"
 dependencies = [
     "beautifulsoup4>=4.12,<5",
-    "requests>=2.31,<3",
 ]
 
 classifiers = [
@@ -27,6 +26,11 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+excel = [
+    "pandas>=2,<3",
+    "openpyxl>=3.1,<4",
+]
+xpath = ["lxml>=4.9,<7"]
 scrapy = ["Scrapy>=2.16,<3"]
 drissionpage = [
     "Scrapy>=2.16,<3",
@@ -41,6 +45,9 @@ scrapling = [
     "scrapling[fetchers]>=0.4.9,<0.5",
 ]
 all = [
+    "pandas>=2,<3",
+    "openpyxl>=3.1,<4",
+    "lxml>=4.9,<7",
     "Scrapy>=2.16,<3",
     "DrissionPage>=4.1.1.4,<5",
     "requests-go>=1.0.9,<2",
