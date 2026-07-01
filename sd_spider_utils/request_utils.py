@@ -2,6 +2,7 @@ def request_with_requests_go(
     url,
     method="GET",
     headers=None,
+    proxy=None,
     timeout=30,
     tls_config=None,
     **kwargs,
@@ -11,6 +12,7 @@ def request_with_requests_go(
     :param url: 请求地址
     :param method: HTTP 请求方法
     :param headers: 请求头字典
+    :param proxy: HTTP/HTTPS 共用的代理链接
     :param timeout: 请求超时秒数
     :param tls_config: TLS 指纹配置，默认使用最新版 Chrome
     :param kwargs: 传给 requests-go 的其他请求参数
@@ -23,6 +25,8 @@ def request_with_requests_go(
 
     if tls_config is None:
         tls_config = requests_go.tls_config.TLS_CHROME_LATEST
+    if proxy:
+        kwargs["proxies"] = {"http": proxy, "https": proxy}
     return requests_go.request(
         method=method.upper(),
         url=url,

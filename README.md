@@ -57,6 +57,7 @@ from sd_spider_utils import request_with_requests_go
 response = request_with_requests_go(
     "https://research.com/rankings",
     headers=headers,
+    proxy="http://127.0.0.1:7890",
 )
 print(response.text)
 print(response.status_code)

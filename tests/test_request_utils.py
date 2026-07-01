@@ -21,6 +21,7 @@ class RequestsGoTests(unittest.TestCase):
             result = request_with_requests_go(
                 "https://example.com",
                 headers={"User-Agent": "Chrome"},
+                proxy="http://127.0.0.1:7890",
                 verify=False,
             )
 
@@ -35,6 +36,10 @@ class RequestsGoTests(unittest.TestCase):
             headers={"User-Agent": "Chrome"},
             timeout=30,
             tls_config=chrome_tls,
+            proxies={
+                "http": "http://127.0.0.1:7890",
+                "https": "http://127.0.0.1:7890",
+            },
             verify=False,
         )
 
