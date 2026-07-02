@@ -19,7 +19,8 @@ Scrapy 中间件按需安装：
     pip install "sd_spider_utils[all]"
 
 只使用某一个下载后端时，也可以安装 ``scrapy``、``requests-go``、
-``drissionpage`` 或 ``scrapling`` extra。Scrapling 首次使用还需要执行：
+``curl-cffi``、``drissionpage`` 或 ``scrapling`` extra。Scrapling
+首次使用还需要执行：
 
 ::
 
@@ -52,7 +53,7 @@ Scrapy 下载中间件
         meta={"download_backend": "requests_go"},
     )
 
-可选后端为 ``scrapy``、``requests_go``、``dp``、
+可选后端为 ``scrapy``、``requests_go``、``curl_cffi``、``dp``、
 ``dp_listen`` 和 ``scrapling``。
 
 监听接口时使用 ``download_backend="dp_listen"``，并通过

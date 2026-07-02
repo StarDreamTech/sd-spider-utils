@@ -1,6 +1,6 @@
 """Scrapy 下载中间件。
 
-通过 request.meta["download_backend"] 选择 requests_go、dp、dp_listen
+通过 request.meta["download_backend"] 选择 requests_go、curl_cffi、dp、dp_listen
 或 scrapling；不设置时继续使用 Scrapy 默认下载器。
 """
 
@@ -17,7 +17,14 @@ from twisted.internet.threads import deferToThread
 logger = logging.getLogger(__name__)
 
 BACKEND_META_KEY = "download_backend"
-SUPPORTED_BACKENDS = {"scrapy", "requests_go", "dp", "dp_listen", "scrapling"}
+SUPPORTED_BACKENDS = {
+    "scrapy",
+    "requests_go",
+    "curl_cffi",
+    "dp",
+    "dp_listen",
+    "scrapling",
+}
 _BROWSER_BACKENDS = {"dp", "dp_listen", "scrapling"}
 # 重新包装 HtmlResponse 时移除可能失真的传输类响应头。
 _DROP_RESPONSE_HEADERS = {"content-encoding", "content-length", "transfer-encoding"}
@@ -132,6 +139,7 @@ class BackendRouterMiddleware:
 
         download = {
             "requests_go": self._download_requests_go,
+            "curl_cffi": self._download_curl_cffi,
             "dp": self._download_dp,
             "dp_listen": self._download_dp_listen,
             "scrapling": self._download_scrapling,
@@ -163,6 +171,37 @@ class BackendRouterMiddleware:
             response.url,
             response.headers,
             "requests_go",
+        )
+
+    def _download_curl_cffi(self, request: Request, timeout: float):
+        """使用 curl_cffi 下载请求。"""
+        from .request_utils import request_with_curl_cffi
+
+        options = {
+            "method": request.method,
+            "headers": _request_headers(request),
+            "proxy": request.meta.get("proxy"),
+            "timeout": timeout,
+            "impersonate": request.meta.get(
+                "impersonate",
+                self.settings.get("SD_CURL_CFFI_IMPERSONATE", "chrome"),
+            ),
+            "allow_redirects": False,
+            "verify": request.meta.get(
+                "verify",
+                self.settings.getbool("SD_CURL_CFFI_VERIFY", True),
+            ),
+        }
+        if request.body:
+            options["data"] = request.body
+        response = request_with_curl_cffi(request.url, **options)
+        return _build_response(
+            request,
+            response.content,
+            response.status_code,
+            response.url,
+            response.headers,
+            "curl_cffi",
         )
 
     def _get_browser(self, request: Request):

@@ -16,6 +16,7 @@ pip install "sd_spider_utils[excel]"        # pandas、openpyxl
 pip install "sd_spider_utils[xpath]"        # lxml
 pip install "sd_spider_utils[scrapy]"       # Scrapy 文本解析
 pip install "sd_spider_utils[requests-go]"  # Scrapy + requests-go
+pip install "sd_spider_utils[curl-cffi]"    # Scrapy + curl-cffi
 pip install "sd_spider_utils[drissionpage]" # Scrapy + DrissionPage
 pip install "sd_spider_utils[scrapling]"    # Scrapy + Scrapling
 pip install "sd_spider_utils[all]"          # 安装全部可选功能
@@ -40,6 +41,7 @@ Scrapling 首次使用还需执行 `scrapling install` 下载浏览器。
 | `data2excel(data, path)` | 字典列表写入 Excel |
 | `json2excel(path)` | JSON/JSONL 转换为同名 Excel |
 | `request_with_requests_go(url)` | 使用 Chrome TLS 指纹发起 HTTP 请求 |
+| `request_with_curl_cffi(url)` | 使用 curl_cffi 模拟浏览器指纹发起请求 |
 | `strtobool(value)` | 常见真假字符串转布尔值 |
 
 ```python
@@ -62,6 +64,26 @@ response = request_with_requests_go(
 print(response.text)
 print(response.status_code)
 ```
+
+### curl_cffi 请求
+
+```python
+from sd_spider_utils import request_with_curl_cffi
+
+response = request_with_curl_cffi(
+    "https://www.amazon.com/s",
+    params={"k": "洗发水", "i": "aps"},
+    headers={"Referer": "https://www.amazon.com/"},
+    impersonate="chrome",
+)
+print(response.text)
+print(response.status_code)
+```
+
+`impersonate="chrome"` 会使用当前安装版本支持的最新版 Chrome 指纹；
+传入 `chrome120` 等值可固定版本，传入 `None` 则不启用浏览器指纹模拟。
+启用指纹模拟时，建议只补充业务需要的请求头，避免手写的 User-Agent 或
+`sec-ch-ua` 版本与 TLS 指纹不一致。
 
 ## DrissionPage 工具
 
@@ -117,7 +139,8 @@ yield scrapy.Request(
 )
 ```
 
-支持 `scrapy`、`requests_go`、`dp`、`dp_listen` 和 `scrapling`。
+支持 `scrapy`、`requests_go`、`curl_cffi`、`dp`、`dp_listen` 和
+`scrapling`。
 监听接口时还需传入 `listen_path`：
 
 ```python
@@ -141,6 +164,8 @@ yield scrapy.Request(
 | `SD_DRISSION_HEADLESS` | `True` | DrissionPage 是否无头运行 |
 | `SD_DRISSION_LOAD_MODE` | 空 | DrissionPage 加载模式 |
 | `SD_REQUESTS_GO_VERIFY` | `True` | requests-go 是否校验证书 |
+| `SD_CURL_CFFI_IMPERSONATE` | `chrome` | curl_cffi 使用的浏览器指纹 |
+| `SD_CURL_CFFI_VERIFY` | `True` | curl_cffi 是否校验证书 |
 | `SD_SCRAPLING_HEADLESS` | `True` | Scrapling 是否无头运行 |
 
 ## 开发检查

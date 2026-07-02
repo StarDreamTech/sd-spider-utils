@@ -26,7 +26,14 @@ class DummyCrawler:
 class MiddlewareTests(unittest.TestCase):
     def test_backend_selection(self):
         self.assertIsNone(_backend_for_request(Request("https://example.com")))
-        for backend in ("scrapy", "requests_go", "dp", "dp_listen", "scrapling"):
+        for backend in (
+            "scrapy",
+            "requests_go",
+            "curl_cffi",
+            "dp",
+            "dp_listen",
+            "scrapling",
+        ):
             request = Request(
                 "https://example.com",
                 meta={BACKEND_META_KEY: backend},
@@ -108,6 +115,35 @@ class MiddlewareTests(unittest.TestCase):
                 Request("https://example.com"),
                 20,
             )
+
+    def test_curl_cffi_forwards_impersonate(self):
+        call = {}
+
+        def fake_request(url, **kwargs):
+            call.update(url=url, **kwargs)
+            return SimpleNamespace(
+                url="https://example.com/final",
+                status_code=200,
+                headers={"Content-Type": "text/html"},
+                content=b"ok",
+            )
+
+        module = SimpleNamespace(request_with_curl_cffi=fake_request)
+        middleware = BackendRouterMiddleware(
+            DummyCrawler({"SD_CURL_CFFI_IMPERSONATE": "chrome120"})
+        )
+        request = Request(
+            "https://example.com/start",
+            meta={"impersonate": "chrome124"},
+        )
+        with patch.dict(
+            sys.modules,
+            {"sd_spider_utils.request_utils": module},
+        ):
+            response = middleware._download_curl_cffi(request, 20)
+
+        self.assertEqual(call["impersonate"], "chrome124")
+        self.assertEqual(response.text, "ok")
 
     def test_dp_browser_uses_dp_utils_manager(self):
         created_options = []

@@ -34,6 +34,10 @@ _LAZY_EXPORTS["request_with_requests_go"] = (
     ".request_utils",
     "request_with_requests_go",
 )
+_LAZY_EXPORTS["request_with_curl_cffi"] = (
+    ".request_utils",
+    "request_with_curl_cffi",
+)
 
 
 def __getattr__(name):
@@ -67,6 +71,7 @@ __all__ = [
     "normalize_obj",
     "normalize_text",
     "remove_extra_spaces",
+    "request_with_curl_cffi",
     "request_with_requests_go",
     "save_page",
     "singleton",
