@@ -1,6 +1,6 @@
 [project]
 name = "sd_spider_utils"
-version = "1.0.7"
+version = "1.0.8"
 description = "爬虫工具包，写爬虫更快！！！"
 readme = "README.rst"
 license = { file = "LICENSE" }
@@ -11,6 +11,7 @@ urls = { Homepage = "https://space.bilibili.com/1909782963" }
 requires-python = ">=3.10"
 dependencies = [
     "beautifulsoup4>=4.12,<5",
+    "rich>=13.7,<15",
 ]
 
 classifiers = [
@@ -24,6 +25,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries",
 ]
+
+[project.scripts]
+sd-codex-usage = "sd_spider_utils.codex_usage:main"
 
 [project.optional-dependencies]
 excel = [

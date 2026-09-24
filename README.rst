@@ -26,6 +26,27 @@ Scrapy 中间件按需安装：
 
     scrapling install
 
+Codex 用量查询
+--------------
+
+将仓库中的 ``codex.env.example`` 复制为 ``codex.env``，填入
+``CODEX_ACCESS_TOKEN`` 和 ``CODEX_ACCOUNT_ID``，然后执行：
+
+::
+
+    sd-codex-usage --env codex.env
+    sd-codex-usage --env codex.env --json
+
+输出账号套餐、用量百分比、额度重置时间、查询时间，以及可用重置卡张数和每张卡的过期时间。
+默认将所有账号合并为一张 Rich 彩色汇总表，按剩余额度用绿、黄、红提示，倒计时显示为天、小时、分、秒。
+``--json`` 保留原始数值及 ISO 时间格式。
+命令仅发送 GET 请求查询信息，不会使用或兑换重置卡。过期时间缺失时显示未知。
+多账号使用 ``CODEX_名称_ACCESS_TOKEN`` / ``CODEX_名称_ACCOUNT_ID`` 成对配置。
+也支持 ``CODEX_ACCESS_TOKEN_名称`` / ``CODEX_ACCOUNT_ID_名称``，名称区分大小写。
+``--encode`` / ``--decode`` 支持 ``base64rev:`` 前缀的 Base64 倒序混淆；
+混淆不是加密。仅支持 ChatGPT 登录凭据，不支持普通 API Key。
+详细格式、错误处理和 PyCharm 配置见仓库 README.md。
+
 使用示例
 --------
 
