@@ -24,9 +24,33 @@ pip install "sd_spider_utils[all]"          # 安装全部可选功能
 
 Scrapling 首次使用还需执行 `scrapling install` 下载浏览器。
 
+## 开发环境（uv）
+
+先按 [uv 官方文档](https://docs.astral.sh/uv/getting-started/installation/) 安装 uv，
+然后在项目根目录执行：
+
+```bash
+uv sync --locked
+```
+
+uv 会按 `.python-version` 使用 Python 3.12（缺少时自动下载），创建 `.venv`，
+并以可编辑模式安装项目及开发依赖。依赖统一在 `pyproject.toml` 中声明，
+`uv.lock` 纳入版本控制，不再维护 `requirements.txt`。
+
+```bash
+uv sync --locked --all-extras  # 安装全部可选功能
+uv run --extra scrapling scrapling install  # 使用 Scrapling 时下载浏览器
+uv add 包名                   # 添加运行依赖并更新锁文件
+uv add --dev 包名             # 添加开发依赖并更新锁文件
+uv lock --upgrade            # 主动升级锁定的依赖
+```
+
+通过 `uv run --extra 名称 ...` 或 `uv run --all-extras ...` 运行需要可选功能的命令。
+提交依赖变更时同时提交 `pyproject.toml` 和 `uv.lock`。
+
 ## Codex 用量命令
 
-开发目录先执行 `python -m pip install -e .`，然后复制根目录的
+开发目录先执行 `uv sync --locked`，然后复制根目录的
 `codex.env.example` 为 `codex.env`，填入 ChatGPT 登录生成的 `auth.json`
 中 `tokens.access_token` 和 `tokens.account_id`：
 
@@ -44,10 +68,10 @@ CODEX_WORK_ACCOUNT_ID=your-work-account-id
 示例占位值必须替换为真实凭据，暂不用的账号请将两行都注释掉。
 
 ```bash
-sd-codex-usage --env codex.env
-sd-codex-usage --env "D:/private/codex.env" --json --timeout 20
-# 不安装命令入口时，在项目根目录执行：
-python -m sd_spider_utils.codex_usage --env codex.env
+uv run sd-codex-usage --env codex.env
+uv run sd-codex-usage --env "D:/private/codex.env" --json --timeout 20
+# 也可通过模块运行：
+uv run python -m sd_spider_utils.codex_usage --env codex.env
 ```
 
 输出各账号的套餐、已用/剩余百分比、实际窗口时长、额度重置时间（本地时区，
@@ -66,7 +90,7 @@ JSON 保留服务端的 `allowed` / `limit_reached` 原始值，不用显示层�
 168 小时显示为“每周窗口”；例如 `177210` 秒显示为“2 天 1 小时 13 分 30 秒”，
 日期显示为 `2026-09-25 14:21:03`。
 重定向输出时自动关闭颜色；`--json` 仍保留原始秒数、时间戳和 ISO 时间，不添加颜色控制码。
-更新旧环境时执行 `python -m pip install -e .` 安装新增的 Rich 依赖。
+更新代码后执行 `uv sync --locked` 同步依赖。
 同时显示可用重置卡张数、每张返回卡片的状态和过期时间（本地时区）。
 张数以服务端 `available_count` 为准，明细可能只返回部分卡片，不能用列表长度代替。
 未提供过期时间显示“未知”，不推断为永不过期；未提供张数也不当作 0。
@@ -83,8 +107,8 @@ JSON 中对应 `rate_limit_reset_credits`，包含 `available_count` 和 `credit
 需要沿用 Base64 后倒序的混淆格式时：
 
 ```bash
-sd-codex-usage --encode  # 隐藏输入，输出 base64rev: 前缀的完整值
-sd-codex-usage --decode # 隐藏输入，解码带前缀的值
+uv run sd-codex-usage --encode  # 隐藏输入，输出 base64rev: 前缀的完整值
+uv run sd-codex-usage --decode # 隐藏输入，解码带前缀的值
 ```
 
 把生成的完整值填入任一账号字段即可。已有的无前缀倒序 Base64 值需手动
@@ -110,7 +134,7 @@ Git 忽略规则，勿提交凭据；编码、解码命令会把结果打印到�
 这是客户端后端接口，可能变动；本项目使用模拟响应测试，不保证每个网络环境均可直接访问。
 
 PyCharm 运行配置可选择模块 `sd_spider_utils.codex_usage`，参数填写
-`--env D:/private/codex.env`，解释器选择已安装本项目的环境。
+`--env D:/private/codex.env`，解释器选择项目的 `.venv` 环境。
 
 ## 常用函数
 
@@ -260,9 +284,10 @@ yield scrapy.Request(
 ## 开发检查
 
 ```bash
-python -m unittest discover -s tests
-black --check sd_spider_utils tests
-flake8 --ignore=E501 sd_spider_utils tests
+uv run --locked python -m unittest discover -s tests
+uv run --locked black --check sd_spider_utils tests
+uv run --locked flake8 --ignore=E501 sd_spider_utils tests
+uv build
 ```
 
 

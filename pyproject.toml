@@ -63,6 +63,14 @@ all = [
     "scrapling[fetchers]>=0.4.9,<0.5",
 ]
 
+[dependency-groups]
+dev = [
+    "black==24.8.0",
+    "flake8==6.0.0",
+    "pre-commit>=3.5,<5",
+    "Scrapy>=2.16,<3",
+]
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

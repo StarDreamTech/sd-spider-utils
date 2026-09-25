@@ -26,6 +26,22 @@ Scrapy 中间件按需安装：
 
     scrapling install
 
+开发环境（uv）
+--------------
+
+源码开发统一使用 uv，在项目根目录执行：
+
+::
+
+    uv sync --locked
+    uv run --locked python -m unittest discover -s tests
+    uv build
+
+uv 按 ``.python-version`` 使用 Python 3.12，并创建 ``.venv``。
+开发依赖在 ``pyproject.toml`` 的 ``dev`` 组中，锁定版本记录在 ``uv.lock``。
+需要全部可选功能时执行 ``uv sync --locked --all-extras``，运行命令时也加上
+``--all-extras``。更多开发命令见仓库 README.md。
+
 Codex 用量查询
 --------------
 
