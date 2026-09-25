@@ -3,3 +3,4 @@ Scrapy
 APScheduler
 beautifulsoup4
 SQLAlchemy
+curl_cffi
