@@ -1,4 +1,3 @@
-import atexit
 import logging
 import time
 
@@ -84,37 +83,35 @@ def request_with_curl_cffi(
     )
 
 
-_tab = None
-
-
-def _get_tab():
-    """获取全局复用的浏览器标签页，进程退出时自动关闭浏览器。"""
-    global _tab
-    if _tab is None:
-        from DrissionPage import Chromium, ChromiumOptions
-
-        browser = Chromium(ChromiumOptions().auto_port())
-        atexit.register(browser.quit)
-        _tab = browser.new_tab()
-    return _tab
-
-
-def fetch_text_with_browser(url, retries=10, interval=1):
+def fetch_text_with_browser(
+    url,
+    retries=10,
+    interval=1,
+    browser_type="default",
+    headless=True,
+):
     """用浏览器打开页面，等待通过 Vercel 安全验证后返回页面文本。
 
     :param url: 目标网页地址
     :param retries: 最多检查次数
     :param interval: 每次检查间隔秒数
+    :param browser_type: 浏览器类型；同一类型复用同一个实例
+    :param headless: 首次创建浏览器时是否使用无头模式
     :return: 页面 body 文本；未通过验证时返回 None
     """
-    tab = _get_tab()
-    tab.get(url)
-    for _ in range(retries):
-        text = tab.ele("tag:body").text
-        if any(tip in text for tip in CHECKPOINT_FAILED):
-            tab.refresh()
-        elif not any(tip in text for tip in CHECKPOINT_WAITING):
-            return text
-        time.sleep(interval)
-    logger.warning("未通过浏览器验证: %s", url)
-    return None
+    from .dp_utils import get_browser
+
+    tab = get_browser(browser_type, headless=headless).new_tab()
+    try:
+        tab.get(url)
+        for _ in range(retries):
+            text = tab.ele("tag:body").text
+            if any(tip in text for tip in CHECKPOINT_FAILED):
+                tab.refresh()
+            elif not any(tip in text for tip in CHECKPOINT_WAITING):
+                return text
+            time.sleep(interval)
+        logger.warning("未通过浏览器验证: %s", url)
+        return None
+    finally:
+        tab.close()

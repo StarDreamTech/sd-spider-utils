@@ -130,6 +130,7 @@ PyCharm 运行配置可选择模块 `sd_spider_utils.codex_usage`，参数填写
 | `json2excel(path)` | JSON/JSONL 转换为同名 Excel |
 | `request_with_requests_go(url)` | 使用 Chrome TLS 指纹发起 HTTP 请求 |
 | `request_with_curl_cffi(url)` | 使用 curl_cffi 模拟浏览器指纹发起请求 |
+| `fetch_text_with_browser(url)` | 浏览器打开页面，等待 Vercel 安全验证通过后返回正文 |
 | `strtobool(value)` | 常见真假字符串转布尔值 |
 
 ```python

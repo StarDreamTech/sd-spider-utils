@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 import sd_spider_utils
 from sd_spider_utils.request_utils import (
+    fetch_text_with_browser,
     request_with_curl_cffi,
     request_with_requests_go,
 )
@@ -92,6 +93,53 @@ class RequestsGoTests(unittest.TestCase):
     def test_curl_cffi_timeout_must_be_positive(self):
         with self.assertRaises(ValueError):
             request_with_curl_cffi("https://example.com", timeout=0)
+
+
+class FakeTab:
+    def __init__(self, texts):
+        self.texts = list(texts)
+        self.refreshed = 0
+        self.closed = False
+
+    def get(self, url):
+        self.url = url
+
+    def ele(self, locator):
+        return types.SimpleNamespace(text=self.texts.pop(0))
+
+    def refresh(self):
+        self.refreshed += 1
+
+    def close(self):
+        self.closed = True
+
+
+class FetchTextWithBrowserTests(unittest.TestCase):
+    def fetch(self, texts, **kwargs):
+        tab = FakeTab(texts)
+        browser = types.SimpleNamespace(new_tab=lambda: tab)
+        with patch("sd_spider_utils.dp_utils.get_browser", return_value=browser):
+            with patch("sd_spider_utils.request_utils.time.sleep"):
+                return fetch_text_with_browser("https://example.com", **kwargs), tab
+
+    def test_waits_until_checkpoint_passed(self):
+        result, tab = self.fetch(
+            ["We're verifying your browser", "无法验证您的浏览器", "正文"]
+        )
+
+        self.assertEqual(result, "正文")
+        self.assertEqual(tab.refreshed, 1)
+        self.assertTrue(tab.closed)
+        self.assertIs(
+            sd_spider_utils.fetch_text_with_browser,
+            fetch_text_with_browser,
+        )
+
+    def test_returns_none_when_checkpoint_never_passes(self):
+        result, tab = self.fetch(["我们正在验证您的浏览器"] * 3, retries=3)
+
+        self.assertIsNone(result)
+        self.assertTrue(tab.closed)
 
 
 if __name__ == "__main__":

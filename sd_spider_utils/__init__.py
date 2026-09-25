@@ -38,6 +38,10 @@ _LAZY_EXPORTS["request_with_curl_cffi"] = (
     ".request_utils",
     "request_with_curl_cffi",
 )
+_LAZY_EXPORTS["fetch_text_with_browser"] = (
+    ".request_utils",
+    "fetch_text_with_browser",
+)
 
 
 def __getattr__(name):
@@ -61,6 +65,7 @@ __all__ = [
     "data2excel",
     "download_page",
     "extract_dates",
+    "fetch_text_with_browser",
     "get_browser",
     "get_html_from_chrome",
     "get_text_bs4",
