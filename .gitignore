@@ -1,3 +1,4 @@
 /.idea
 dist
 sd_spider_utils.egg-info
+.DS_Store
