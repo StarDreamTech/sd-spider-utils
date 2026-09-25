@@ -1,4 +1,13 @@
 /.idea
 dist
 sd_spider_utils.egg-info
+__pycache__/
+*.py[cod]
+.venv/
+build/
+.env
+.env.*
+*.env
+!.env.example
+!*.env.example
 .DS_Store

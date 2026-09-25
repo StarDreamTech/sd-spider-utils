@@ -1,4 +1,5 @@
 def xpath_demo():
+    """打印常用 Scrapy XPath 写法示例。"""
     print(
         """
     类名为 cpython666 的节点 response.xpath("//*[@class='cpython666']")
