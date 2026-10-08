@@ -28,6 +28,7 @@ classifiers = [
 
 [project.scripts]
 sd-codex-usage = "sd_spider_utils.codex_usage:main"
+sd-steam-reviews = "sd_spider_utils.steam_reviews:cli"
 
 [project.optional-dependencies]
 excel = [

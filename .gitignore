@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 .venv/
 build/
+/steam_reviews/
 .env
 .env.*
 *.env

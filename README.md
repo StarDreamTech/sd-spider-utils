@@ -48,6 +48,47 @@ uv lock --upgrade            # 主动升级锁定的依赖
 通过 `uv run --extra 名称 ...` 或 `uv run --all-extras ...` 运行需要可选功能的命令。
 提交依赖变更时同时提交 `pyproject.toml` 和 `uv.lock`。
 
+## Steam 评测导出命令
+
+安装包含此功能的版本后可直接运行 `sd-steam-reviews`，无需 Steam 账号、Cookie、
+API Key、数据库或额外依赖。源码开发先执行 `uv sync --locked`，
+再用 `uv run sd-steam-reviews ...` 运行；pip 安装用户直接使用以下命令。
+
+```bash
+# 任意 Steam 游戏：AppID 可从商店地址 /app/ 后的数字获取
+sd-steam-reviews --appid 246420 --language schinese
+# 王国保卫战 1～5 的快捷选择；all 表示全部语言
+sd-steam-reviews --kingdom-rush 1 --language all
+# 指定文件，再次运行相同命令自动增量采集
+sd-steam-reviews --appid 246420 --output "./data/reviews.jl"
+# 查看所有选项，也可通过模块方式运行
+sd-steam-reviews --help
+python -m sd_spider_utils.steam_reviews --appid 246420
+```
+
+每次采集一个游戏，默认语言为 `schinese`（简体中文），也支持 `english`、`tchinese`、
+`all` 等 Steam 语言代码。先请求首屏，显示评论总数、请求量估算和输出位置；
+**直接按回车才开始写入，输入其他内容或结束输入则取消**。默认文件位于当前工作目录的
+`steam_reviews/<appid>_<language>.jl`，每行是完整评测 JSON，附加 `_collection`
+记录游戏、查询语言和 UTC 抓取时间。中文及正文换行会正确保留。
+
+- `--mode auto`（默认）：首次完整初始化，完成后再次运行只采集新增时间段，按评测 ID 去重。
+- `--mode init`：完整初始化，拒绝覆盖非空文件。
+- `--mode incremental`：要求已有数据文件；缺少成功状态时先完整扫描、去重补齐。
+- `--mode full`：重新扫描所有历史并去重追加，可补充延迟公开或后来改变语言的旧评测。
+- `--page-size 100`：每页 1～100 条；`--interval 1`：请求间隔至少 1 秒。
+
+请将 `.jl` 和同名 `.jl.state.json` 一起保留，并避免同时运行两个任务写同一文件。
+失败不会推进成功时间边界，已写入的完整记录保留；重跑同一命令即可去重补采。
+增量不覆盖旧评测的修改，也不删除已保存内容。文件损坏或游戏/语言不匹配时停止，避免混写。
+退出码为 `0` 成功或取消、`1` 采集失败、`2` 参数错误、`130` 用户中断。
+
+命令使用 Steam 官方公开的
+[GetAppReviews 接口](https://partner.steamgames.com/doc/webapi/IUserReviewsService)，
+包含全部好差评、购买来源和离题评测，但仅能导出接口公开返回的内容。
+匿名响应可能缓存最多 10 分钟；限流或临时网络错误会有限重试，长时间限流则退出保留进度。
+命令不读取项目的账号配置；默认输出目录已加入 Git 忽略规则，采集结果无需放入包内。
+
 ## Codex 用量命令
 
 开发目录先执行 `uv sync --locked`，然后复制根目录的

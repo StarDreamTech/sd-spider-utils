@@ -42,6 +42,35 @@ uv 按 ``.python-version`` 使用 Python 3.12，并创建 ``.venv``。
 需要全部可选功能时执行 ``uv sync --locked --all-extras``，运行命令时也加上
 ``--all-extras``。更多开发命令见仓库 README.md。
 
+Steam 评测导出
+--------------
+
+安装包含此功能的版本后直接使用，无需 Steam 登录、Cookie、API Key 或数据库：
+
+::
+
+    sd-steam-reviews --appid 246420 --language schinese
+    sd-steam-reviews --kingdom-rush 1 --language all
+    sd-steam-reviews --appid 246420 --output "./data/reviews.jl"
+    sd-steam-reviews --help
+    python -m sd_spider_utils.steam_reviews --appid 246420
+
+每次采集一个游戏；``--kingdom-rush`` 支持 1～5 代，默认语言为简体中文。
+预览总数和预计请求量后，直接按回车开始，输入其他内容或结束输入则取消。
+默认输出当前目录下 ``steam_reviews/<appid>_<language>.jl``，每行是完整评测 JSON，
+附加游戏、查询语言和 UTC 抓取时间；成功后保存同名 ``.jl.state.json``。
+请保留这两个文件，避免两个任务同时写同一文件。
+
+默认 ``--mode auto`` 首次完整初始化，之后按时间边界增量采集并按 ID 去重。
+``--mode init`` 拒绝覆盖非空文件；``--mode incremental`` 要求已有数据文件；
+缺少成功状态时先去重补齐初始化。``--mode full`` 可全历史去重补采。
+增量不覆盖旧评测的修改，不删除已保存内容；失败不推进成功边界，重跑即可补采。
+``--page-size`` 支持 1～100，默认 100；``--interval`` 默认 1 秒且至少 1 秒。
+
+使用 Steam 官方公开 GetAppReviews 接口，仅采集公开可返回的评测。
+匿名响应可能缓存最多 10 分钟；临时错误有限重试，长时间限流退出并保留进度。
+退出码：0 成功或取消，1 采集失败，2 参数错误，130 用户中断。
+
 Codex 用量查询
 --------------
 
