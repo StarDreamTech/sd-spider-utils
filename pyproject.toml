@@ -1,6 +1,6 @@
 [project]
 name = "sd_spider_utils"
-version = "1.0.8"
+version = "1.0.9"
 description = "爬虫工具包，写爬虫更快！！！"
 readme = "README.rst"
 license = { file = "LICENSE" }
@@ -31,6 +31,7 @@ sd-codex-usage = "sd_spider_utils.codex_usage:main"
 sd-steam-reviews = "sd_spider_utils.steam_reviews:cli"
 
 [project.optional-dependencies]
+model-check = ["numpy>=1.26,<3"]
 excel = [
     "pandas>=2,<3",
     "openpyxl>=3.1,<4",
@@ -54,6 +55,7 @@ scrapling = [
     "scrapling[fetchers]>=0.4.9,<0.5",
 ]
 all = [
+    "numpy>=1.26,<3",
     "pandas>=2,<3",
     "openpyxl>=3.1,<4",
     "lxml>=4.9,<7",
@@ -75,3 +77,6 @@ dev = [
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+"sd_spider_utils._modeltrace" = ["unified_bank.json", "LICENSE", "NOTICE.md"]

@@ -139,7 +139,7 @@ JSON 中对应 `rate_limit_reset_credits`，包含 `available_count` 和 `credit
 明细查询失败时保留用量及用量接口给出的张数，并输出 `reset_credits_error`。
 缺失字段显示“未知”，不会当作零用量，也不会推算固定 Token 总配额。
 每次运行重新查询；不修改 env、不刷新登录令牌。单账号失败不影响其他账号查询。
-退出码：`0` 全部成功，`1` 至少一个账号的用量或重置卡明细查询失败，`2` 参数或 env 配置错误。
+退出码：`0` 全部成功，`1` 至少一个账号查询、主动检测或检测结果保存失败，`2` 参数、env 配置或检测依赖错误。
 
 支持 UTF-8（含 BOM）、空行、注释、`export KEY=VALUE` 和单行单/双引号；
 不执行 shell 表达式，不展开 `${变量}`，不读取其他环境变量中的账号凭据。
@@ -156,7 +156,7 @@ uv run sd-codex-usage --decode # 隐藏输入，解码带前缀的值
 补上 `base64rev:`。这是可逆混淆，不是加密；真实 `.env` / `*.env` 已加入
 Git 忽略规则，勿提交凭据；编码、解码命令会把结果打印到终端。
 
-命令只发出 GET 请求，固定访问以下两个只读接口：
+默认额度查询只发出 GET 请求，固定访问以下两个只读接口：
 
 - `https://chatgpt.com/backend-api/wham/usage`：用量和重置卡张数。
 - `https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`：重置卡明细。
@@ -176,6 +176,51 @@ Git 忽略规则，勿提交凭据；编码、解码命令会把结果打印到�
 
 PyCharm 运行配置可选择模块 `sd_spider_utils.codex_usage`，参数填写
 `--env D:/private/codex.env`，解释器选择项目的 `.venv` 环境。
+
+### Codex 模型指纹检测（gpt-6-astra / ultra）
+
+安装可选依赖。程序优先使用 PATH 中的 `codex`；macOS 找不到命令时，
+会查找 `/Applications` 或 `~/Applications` 中 ChatGPT.app 内置的 CLI，
+无需为了此功能单独安装或修改终端 PATH。其他安装方式需确保 `codex` 在 PATH 中：
+
+```bash
+uv sync --locked --extra model-check
+uv run --locked --extra model-check sd-codex-usage --env codex.env --detect
+# 只检测 WORK 账号；无名称账号使用 --account '(默认)'
+uv run --locked --extra model-check sd-codex-usage --env codex.env --detect --account WORK
+```
+
+固定使用 Codex 订阅模式、`gpt-6-astra`、`ultra`，没有切换型号或推理强度的参数。
+通过本机 Codex app-server 的外部 ChatGPT 登录模式传入所选 env 账号的凭据，
+在独立临时环境中生成三份数字挑战回答，再使用随包 ModelTrace 指纹库离线评分。
+`ultra` 交给 Codex 运行时处理，不作为普通 API 的推理强度直接发送；
+数字挑战禁止工具生成随机数，不测试自动委派能力。旧版 Codex 不支持相应协议或模式时会报错。
+不读取当前 Codex 聊天，不更改常用登录；登录令牌仅通过子进程标准输入传递。
+桌面应用内的 PATH 可能包含内置 CLI，而外部终端没有；应用内检查成功不能证明外部终端能找到命令。
+额度查询的 HTTP 401 与 CLI 查找失败是两个独立问题：env 保存的是令牌副本，不会跟随桌面应用
+自动刷新。401 时需重新取得对应账号的 `access_token` / `account_id` 并更新 env；
+仅重新登录桌面应用而不更新 env，不会改变本命令使用的凭据。
+
+**`--detect` 会消耗所选账号的推理额度。** 未指定 `--account` 时检测 env 内的全部账号，
+最多同时检测 3 个账号，每账号 3 次独立挑战并发执行，合计最多 9 路并发；无需新增命令参数。
+任一次挑战失败或有效整数不足时，取消该账号其余挑战，不对残缺结果评分；已发起的调用仍可能消耗额度。
+不自动改型号或降低强度；按 Ctrl+C 会取消在途挑战并清理本地检测进程。
+检测器不额外重试；Codex 运行时自身的连接恢复可能增加实际请求次数。
+`--detect-timeout 300` 设置每次挑战超时秒数（默认 300），与查询额度的 `--timeout` 分开。
+全部检测结束后再查询额度；单账号检测失败不影响其他账号。检测结果按完成顺序逐个保存，
+最终面板和 JSON 仍按 env 账号顺序展示。
+
+面板显示首选候选、Astra 的**库内概率**、有效回答数及检测时间；`--json` 增加 `model_check`。
+结果摘要保存在 env 文件旁的 `*.model-checks.json`（例如 `codex.model-checks.json`），
+按账号 ID 的 SHA-256 区分，不保存令牌、原始账号 ID 或模型回答，并已加入 Git 忽略。
+普通查询会展示同型号、同推理强度、同指纹库版本的最近记录，不重新调用模型；请结合时间查看，
+旧记录不代表当前会话。缓存损坏时提示并忽略，写入失败时仍显示本次结果。
+
+该功能判断数字输出更像哪个候选，**不能证明模型身份、ultra 实际生效或能力是否下降**。
+随包 ModelTrace 库包含 Astra，但不包含 `gpt-6.1-sol`；其他研究已发现两者难以靠数字指纹区分。
+未收录型号也会得到一个最近候选，因此状态使用“最像目标（仅供参考）”或“最像其他候选（待复测）”，
+不把概率当成“降智概率”。此库未针对 Codex `ultra` 做独立校准。
+算法、数据版本及 MIT 许可见 [`_modeltrace/NOTICE.md`](sd_spider_utils/_modeltrace/NOTICE.md)。
 
 ## 常用函数
 

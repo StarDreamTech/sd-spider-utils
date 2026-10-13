@@ -12,3 +12,4 @@ build/
 !.env.example
 !*.env.example
 .DS_Store
+*.model-checks.json

@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import io
 import json
@@ -217,6 +218,281 @@ class CodexUsageTests(unittest.TestCase):
                     with self.assertRaises(SystemExit) as raised:
                         usage.main(["--env", str(env), "--timeout", timeout])
                     self.assertEqual(raised.exception.code, 2)
+
+    def test_cli_detects_selected_account_before_usage_and_reuses_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = Path(directory) / "accounts.env"
+            env.write_text(
+                "CODEX_ACCESS_TOKEN=unused-secret\nCODEX_ACCOUNT_ID=unused-id\n"
+                "CODEX_WORK_ACCESS_TOKEN=work-secret\nCODEX_WORK_ACCOUNT_ID=private-work-id\n",
+                encoding="utf-8",
+            )
+            record = usage.detection.check_record(
+                "target_first",
+                prediction="gpt-6-astra",
+                probability=0.8,
+                target_probability=0.8,
+                valid_outputs=3,
+            )
+            events, output, errors = [], io.StringIO(), io.StringIO()
+
+            def detect(**kwargs):
+                events.append("detect")
+                return record
+
+            def fetch(**kwargs):
+                self.assertIn("detect", events)
+                events.append("usage")
+                return {
+                    "plan_type": "plus",
+                    "rate_limit": {"primary_window": {"used_percent": 12}},
+                }
+
+            bank = object()
+            with (
+                patch.object(
+                    usage.detection, "prepare_detector", return_value=bank
+                ) as prepare,
+                patch.object(
+                    usage.detection, "detect_model", side_effect=detect
+                ) as detector,
+                patch.object(usage, "fetch_usage", side_effect=fetch) as query,
+                patch.object(
+                    usage,
+                    "fetch_reset_credits",
+                    return_value={"available_count": 0, "credits": []},
+                ),
+                contextlib.redirect_stdout(output),
+                contextlib.redirect_stderr(errors),
+            ):
+                args = ["--env", str(env), "--account", "WORK", "--json"]
+                self.assertEqual(
+                    usage.main(args + ["--detect", "--detect-timeout", "25"]), 0
+                )
+                detected = json.loads(output.getvalue())
+                self.assertEqual(events, ["detect", "usage"])
+                detector.assert_called_once_with(
+                    access_token="work-secret",
+                    account_id="private-work-id",
+                    timeout=25,
+                    bank=bank,
+                )
+                output.seek(0)
+                output.truncate(0)
+                self.assertEqual(usage.main(args), 0)
+                cached = json.loads(output.getvalue())
+                prepare.assert_called_once_with()
+                self.assertEqual(detector.call_count, 1)
+                self.assertEqual(query.call_count, 2)
+            self.assertEqual([row["account"] for row in detected], ["WORK"])
+            self.assertEqual(detected[0]["model_check"]["model"], "gpt-6-astra")
+            self.assertEqual(detected[0]["model_check"]["reasoning_effort"], "ultra")
+            self.assertEqual(cached[0]["model_check"], detected[0]["model_check"])
+            self.assertEqual(
+                detected[0]["limits"][0]["windows"][0]["remaining_percent"], 88
+            )
+            rendered = io.StringIO()
+            usage.print_usage(cached, Console(file=rendered, width=220))
+            for expected in ("模型指纹", "gpt-6-astra / ultra", "最像目标", "80.0%"):
+                self.assertIn(expected, rendered.getvalue())
+            serialized = "".join(
+                (
+                    output.getvalue(),
+                    errors.getvalue(),
+                    rendered.getvalue(),
+                    usage.detection.cache_path(env).read_text(encoding="utf-8"),
+                )
+            )
+            for secret in (
+                "unused-secret",
+                "unused-id",
+                "work-secret",
+                "private-work-id",
+            ):
+                self.assertNotIn(secret, serialized)
+
+    def test_detection_runs_three_accounts_concurrently_and_keeps_row_order(self):
+        accounts = {
+            name: {"access_token": f"private-{name}", "account_id": account_id}
+            for name, account_id in (
+                ("FIRST", "private-shared"),
+                ("SECOND", "private-shared"),
+                ("THIRD", "private-third"),
+                ("FOURTH", "private-fourth"),
+            )
+        }
+        full, second_done = asyncio.Event(), asyncio.Event()
+        active, peak = 0, 0
+        finished, saved = [], []
+
+        async def detect(access_token, account_id, **kwargs):
+            nonlocal active, peak
+            name = access_token.removeprefix("private-")
+            self.assertEqual(account_id, accounts[name]["account_id"])
+            active += 1
+            peak = max(peak, active)
+            if active == 3:
+                full.set()
+            try:
+                await asyncio.wait_for(full.wait(), timeout=1)
+                if name == "FIRST":
+                    await asyncio.wait_for(second_done.wait(), timeout=1)
+                finished.append(name)
+                if name == "SECOND":
+                    second_done.set()
+                return usage.detection.check_record(
+                    "other_first",
+                    prediction=name,
+                    probability=0.7,
+                    target_probability=0.2,
+                    valid_outputs=3,
+                )
+            finally:
+                active -= 1
+
+        def fetch(**kwargs):
+            self.assertEqual(len(finished), 4)
+            return {"plan_type": "plus"}
+
+        output, errors = io.StringIO(), io.StringIO()
+        with (
+            patch.object(usage, "load_accounts", return_value=accounts),
+            patch.object(usage.detection, "prepare_detector", return_value={}),
+            patch.object(usage.detection, "load_checks", return_value={}),
+            patch.object(usage.detection, "detect_model", side_effect=detect),
+            patch.object(
+                usage.detection,
+                "save_checks",
+                side_effect=lambda env, checks: saved.append(dict(checks)),
+            ),
+            patch.object(usage, "fetch_usage", side_effect=fetch),
+            patch.object(
+                usage,
+                "fetch_reset_credits",
+                return_value={"available_count": 0, "credits": []},
+            ),
+            contextlib.redirect_stdout(output),
+            contextlib.redirect_stderr(errors),
+        ):
+            self.assertEqual(
+                usage.main(["--env", "unused.env", "--detect", "--json"]), 0
+            )
+        self.assertEqual(peak, 3)
+        self.assertLess(finished.index("SECOND"), finished.index("FIRST"))
+        results = json.loads(output.getvalue())
+        self.assertEqual([row["account"] for row in results], list(accounts))
+        self.assertEqual(
+            [row["model_check"]["prediction"] for row in results], list(accounts)
+        )
+        self.assertEqual(len(saved), 4)
+        self.assertEqual(
+            set(saved[-1]),
+            {
+                usage.detection.cache_key(pair["account_id"])
+                for pair in accounts.values()
+            },
+        )
+        self.assertNotIn("private-", output.getvalue() + errors.getvalue())
+
+    def test_cli_detection_and_cache_failures_preserve_other_results(self):
+        accounts = {
+            None: {"access_token": "first-secret", "account_id": "first-private-id"},
+            "WORK": {
+                "access_token": "second-secret",
+                "account_id": "second-private-id",
+            },
+        }
+        successful = usage.detection.check_record(
+            "other_first",
+            prediction="gpt-6-sol",
+            probability=0.7,
+            target_probability=0.2,
+            valid_outputs=3,
+        )
+        for cache_failure in (False, True):
+            with self.subTest(cache_failure=cache_failure):
+                output, errors = io.StringIO(), io.StringIO()
+                with (
+                    patch.object(usage, "load_accounts", return_value=accounts),
+                    patch.object(usage.detection, "prepare_detector", return_value={}),
+                    patch.object(usage.detection, "load_checks", return_value={}),
+                    patch.object(
+                        usage.detection,
+                        "detect_model",
+                        side_effect=[
+                            successful if cache_failure else ValueError("检测连接失败"),
+                            successful,
+                        ],
+                    ) as detector,
+                    patch.object(
+                        usage.detection,
+                        "save_checks",
+                        side_effect=(
+                            ValueError("检测结果未能保存") if cache_failure else None
+                        ),
+                    ) as save,
+                    patch.object(
+                        usage, "fetch_usage", return_value={"plan_type": "plus"}
+                    ) as fetch,
+                    patch.object(
+                        usage,
+                        "fetch_reset_credits",
+                        return_value={"available_count": 0, "credits": []},
+                    ),
+                    contextlib.redirect_stdout(output),
+                    contextlib.redirect_stderr(errors),
+                ):
+                    self.assertEqual(
+                        usage.main(["--env", "unused.env", "--detect", "--json"]), 1
+                    )
+                results = json.loads(output.getvalue())
+                self.assertEqual(detector.call_count, 2)
+                self.assertEqual(fetch.call_count, 2)
+                self.assertEqual(save.call_count, 2)
+                self.assertEqual(
+                    results[0]["model_check"]["status"],
+                    "other_first" if cache_failure else "error",
+                )
+                self.assertEqual(results[1]["model_check"], successful)
+                self.assertTrue(all(row["plan_type"] == "plus" for row in results))
+                for row in results:
+                    self.assertEqual("model_check_cache_error" in row, cache_failure)
+                for pair in accounts.values():
+                    for secret in pair.values():
+                        self.assertNotIn(secret, output.getvalue() + errors.getvalue())
+
+    def test_cli_rejects_detection_options_before_network(self):
+        accounts = {None: {"access_token": "secret", "account_id": "private-id"}}
+        with (
+            patch.object(usage, "load_accounts", return_value=accounts),
+            patch.object(usage.detection, "prepare_detector") as prepare,
+            patch.object(usage.detection, "detect_model") as detector,
+            patch.object(usage, "fetch_usage") as fetch,
+            patch.object(usage, "getpass") as prompt,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(
+                usage.main(["--env", "unused.env", "--detect", "--account", "missing"]),
+                2,
+            )
+            invalid_options = [
+                ["--encode", "--detect"],
+                ["--decode", "--account", "WORK"],
+                ["--env", "unused.env", "--detect", "--model", "gpt-6-sol"],
+                ["--env", "unused.env", "--detect", "--reasoning-effort", "low"],
+            ]
+            invalid_options.extend(
+                ["--env", "unused.env", "--detect-timeout", timeout]
+                for timeout in ("0", "-1", "nan", "inf")
+            )
+            for args in invalid_options:
+                with self.subTest(args=args), self.assertRaises(SystemExit) as raised:
+                    usage.main(args)
+                self.assertEqual(raised.exception.code, 2)
+            prepare.assert_not_called()
+            detector.assert_not_called()
+            fetch.assert_not_called()
+            prompt.assert_not_called()
 
     def test_reset_cards_are_read_only_and_keep_authoritative_count(self):
         with tempfile.TemporaryDirectory() as directory:

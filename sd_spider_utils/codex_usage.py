@@ -1,6 +1,7 @@
-"""从指定 env 文件只读查询 Codex 用量、重置时间及重置卡张数和过期时间。"""
+"""查询 Codex 用量与重置卡；可选检测 gpt-6-astra / ultra 的模型指纹。"""
 
 import argparse
+import asyncio
 import base64
 import binascii
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ import re
 import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+from . import codex_detection as detection
 
 
 USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
@@ -345,6 +348,7 @@ def print_usage(results, console=None):
     from rich.text import Text
 
     console = console or Console()
+    show_checks = any("model_check" in result for result in results)
     table = Table(
         title="Codex 用量汇总（本地时间）",
         title_justify="left",
@@ -352,6 +356,7 @@ def print_usage(results, console=None):
         expand=True,
         padding=(0, 1),
         header_style="bold cyan",
+        caption=detection.WARNING if show_checks else None,
     )
     for heading, ratio in (
         ("账号 / 套餐 / 查询时间", 2),
@@ -360,6 +365,8 @@ def print_usage(results, console=None):
         ("重置卡 / 过期时间", 3),
     ):
         table.add_column(heading, ratio=ratio, overflow="fold")
+    if show_checks:
+        table.add_column("模型指纹 / 最近检测", ratio=4, overflow="fold")
     statuses = {"available": "可用", "redeemed": "已使用", "expired": "已过期"}
     for index, result in enumerate(results):
         account = Text(str(result["account"]), style="bold cyan")
@@ -412,7 +419,8 @@ def print_usage(results, console=None):
                             f"{window_status}{separator}", style=_quota_style(remaining)
                         )
                         quota.append(
-                            f"剩余 {remaining:g}%", style=_quota_style(remaining)
+                            "剩余 " + format(remaining, "g") + "%",
+                            style=_quota_style(remaining),
                         )
                     if resets:
                         resets.append("\n")
@@ -456,10 +464,74 @@ def print_usage(results, console=None):
                 cards.append(
                     f"\n仅返回 {len(credits)} 张明细，以 {count} 张为准", style="yellow"
                 )
-        table.add_row(
-            account, quota, resets, cards, end_section=index < len(results) - 1
-        )
+        cells = [account, quota, resets, cards]
+        if show_checks:
+            check = result.get("model_check")
+            details = Text("未检测", style="dim")
+            if check:
+                status = check["status"]
+                details = Text(f"{detection.MODEL} / ultra\n", style="bold")
+                details.append(
+                    detection.STATUS_LABELS[status],
+                    style="cyan" if status == "target_first" else "yellow",
+                )
+                if status == "error":
+                    details.append(f"\n{check['error']}", style="red")
+                else:
+                    details.append(f"\n首选候选：{check['prediction']}")
+                    probability = format(check["target_probability"], ".1%")
+                    details.append(f"\nAstra 库内概率：{probability}")
+                    details.append(f"\n有效回答：{check['valid_outputs']}/3")
+                details.append(
+                    "\n" + _format_datetime(check["checked_at"]), style="dim"
+                )
+                if "model_check_cache_error" in result:
+                    details.append("\n本次结果未保存", style="yellow")
+            cells.append(details)
+        table.add_row(*cells, end_section=index < len(results) - 1)
     console.print(table)
+
+
+async def _detect_accounts(accounts, checks, env_file, timeout, bank):
+    # Three accounts with three concurrent probes each: at most nine subprocesses.
+    slots = asyncio.Semaphore(3)
+    records = {}
+    cache_errors = {}
+
+    async def detect_account(name, pair):
+        async with slots:
+            print(
+                f"正在检测 {name or '(默认)'}：gpt-6-astra / ultra（三次并发挑战）…",
+                file=sys.stderr,
+            )
+            try:
+                record = await detection.detect_model(
+                    **pair, timeout=timeout, bank=bank
+                )
+            except ValueError as exc:
+                record = detection.check_record("error", error=str(exc))
+            return name, detection.cache_key(pair["account_id"]), record
+
+    tasks = [
+        asyncio.create_task(detect_account(name, pair))
+        for name, pair in accounts.items()
+    ]
+    try:
+        for completed in asyncio.as_completed(tasks):
+            name, key, record = await completed
+            records[name] = record
+            checks[key] = record
+            try:
+                detection.save_checks(env_file, checks)
+            except ValueError as exc:
+                cache_errors[name] = str(exc)
+                print(f"提示：{exc}", file=sys.stderr)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    return records, cache_errors
 
 
 def main(argv=None):
@@ -474,17 +546,41 @@ def main(argv=None):
     )
     parser.add_argument("--json", action="store_true", help="以 JSON 数组输出")
     parser.add_argument(
+        "--detect",
+        action="store_true",
+        help="使用 Codex 订阅检测 gpt-6-astra / ultra（最多 3 账号各 3 次并发挑战，消耗额度）",
+    )
+    parser.add_argument(
+        "--account", help="仅查询/检测指定 env 账号名；无名称账号填 '(默认)'"
+    )
+    parser.add_argument(
+        "--detect-timeout",
+        type=float,
+        default=300,
+        help="每次检测挑战超时秒数，默认 300",
+    )
+    parser.add_argument(
         "--timeout", type=float, default=30, help="每个账号请求超时秒数，默认 30"
     )
     args = parser.parse_args(argv)
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout 必须为大于 0 的有限数值")
+    if not math.isfinite(args.detect_timeout) or args.detect_timeout <= 0:
+        parser.error("--detect-timeout 必须为大于 0 的有限数值")
+    if (args.detect or args.account is not None) and args.env is None:
+        parser.error("--detect / --account 必须与 --env 一起使用")
     try:
         if args.encode or args.decode:
             value = getpass("请输入内容（输入隐藏）：")
             print(encode_token(value) if args.encode else decode_token(value))
             return 0
         accounts = load_accounts(args.env)
+        if args.account is not None:
+            name = None if args.account == "(默认)" else args.account
+            if name not in accounts:
+                raise ValueError("指定账号不存在，请检查 env 中的账号名（区分大小写）")
+            accounts = {name: accounts[name]}
+        bank = detection.prepare_detector() if args.detect else None
     except OSError:
         print("错误：无法读取指定 env 文件，请检查路径和权限", file=sys.stderr)
         return 2
@@ -494,9 +590,28 @@ def main(argv=None):
     except (ValueError, EOFError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 2
+    try:
+        checks = detection.load_checks(args.env)
+    except ValueError as exc:
+        print(f"提示：{exc}", file=sys.stderr)
+        checks = {}
+    records, cache_errors = (
+        asyncio.run(
+            _detect_accounts(accounts, checks, args.env, args.detect_timeout, bank)
+        )
+        if args.detect
+        else ({}, {})
+    )
     results = []
     for name, pair in accounts.items():
         result = {"account": name or "(默认)"}
+        key = detection.cache_key(pair["account_id"])
+        if name in cache_errors:
+            result["model_check_cache_error"] = cache_errors[name]
+        if name in records:
+            result["model_check"] = records[name]
+        elif key in checks:
+            result["model_check"] = checks[key]
         try:
             result.update(summarize_usage(fetch_usage(**pair, timeout=args.timeout)))
         except ValueError as exc:
@@ -520,7 +635,15 @@ def main(argv=None):
     return (
         1
         if any(
-            "error" in result or "reset_credits_error" in result for result in results
+            any(
+                (
+                    "error" in result,
+                    "reset_credits_error" in result,
+                    "model_check_cache_error" in result,
+                    args.detect and result["model_check"]["status"] == "error",
+                )
+            )
+            for result in results
         )
         else 0
     )

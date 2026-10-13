@@ -2644,7 +2644,7 @@ wheels = [
 
 [[package]]
 name = "sd-spider-utils"
-version = "1.0.8"
+version = "1.0.9"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -2656,6 +2656,9 @@ all = [
     { name = "curl-cffi" },
     { name = "drissionpage" },
     { name = "lxml" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "requests-go" },
@@ -2673,6 +2676,11 @@ drissionpage = [
 excel = [
     { name = "openpyxl" },
     { name = "pandas" },
+]
+model-check = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 requests-go = [
     { name = "requests-go" },
@@ -2706,6 +2714,8 @@ requires-dist = [
     { name = "drissionpage", marker = "extra == 'drissionpage'", specifier = ">=4.1.1.4,<5" },
     { name = "lxml", marker = "extra == 'all'", specifier = ">=4.9,<7" },
     { name = "lxml", marker = "extra == 'xpath'", specifier = ">=4.9,<7" },
+    { name = "numpy", marker = "extra == 'all'", specifier = ">=1.26,<3" },
+    { name = "numpy", marker = "extra == 'model-check'", specifier = ">=1.26,<3" },
     { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1,<4" },
     { name = "openpyxl", marker = "extra == 'excel'", specifier = ">=3.1,<4" },
     { name = "pandas", marker = "extra == 'all'", specifier = ">=2,<3" },
@@ -2722,7 +2732,7 @@ requires-dist = [
     { name = "scrapy", marker = "extra == 'scrapling'", specifier = ">=2.16,<3" },
     { name = "scrapy", marker = "extra == 'scrapy'", specifier = ">=2.16,<3" },
 ]
-provides-extras = ["excel", "xpath", "scrapy", "drissionpage", "requests-go", "curl-cffi", "scrapling", "all"]
+provides-extras = ["model-check", "excel", "xpath", "scrapy", "drissionpage", "requests-go", "curl-cffi", "scrapling", "all"]
 
 [package.metadata.requires-dev]
 dev = [

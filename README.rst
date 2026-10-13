@@ -85,12 +85,29 @@ Codex 用量查询
 输出账号套餐、用量百分比、额度重置时间、查询时间，以及可用重置卡张数和每张卡的过期时间。
 默认将所有账号合并为一张 Rich 彩色汇总表，按剩余额度用绿、黄、红提示，倒计时显示为天、小时、分、秒。
 ``--json`` 保留原始数值及 ISO 时间格式。
-命令仅发送 GET 请求查询信息，不会使用或兑换重置卡。过期时间缺失时显示未知。
+默认额度查询仅发送 GET 请求，不会使用或兑换重置卡。过期时间缺失时显示未知。
 多账号使用 ``CODEX_名称_ACCESS_TOKEN`` / ``CODEX_名称_ACCOUNT_ID`` 成对配置。
 也支持 ``CODEX_ACCESS_TOKEN_名称`` / ``CODEX_ACCOUNT_ID_名称``，名称区分大小写。
 ``--encode`` / ``--decode`` 支持 ``base64rev:`` 前缀的 Base64 倒序混淆；
 混淆不是加密。仅支持 ChatGPT 登录凭据，不支持普通 API Key。
 详细格式、错误处理和 PyCharm 配置见仓库 README.md。
+
+可选模型指纹检测固定使用 Codex 订阅、``gpt-6-astra`` 和 ``ultra``。
+需要 Codex CLI 及 ``model-check`` 可选依赖。优先查找 PATH；macOS 也会自动查找
+``/Applications`` 或 ``~/Applications`` 中 ChatGPT.app 内置的 CLI：
+
+::
+
+    uv run --locked --extra model-check sd-codex-usage --env codex.env --detect
+    uv run --locked --extra model-check sd-codex-usage --env codex.env --detect --account WORK
+
+最多同时检测三个账号，每账号三次独立挑战并发执行，合计最多九路并发，会消耗推理额度。
+单次挑战失败会取消同账号其余挑战；Ctrl+C 会取消在途挑战并清理本地进程。
+``--detect-timeout`` 控制每次挑战超时（默认 300 秒）。结果逐个保存，最终仍按 env 账号顺序展示。
+通过独立的 Codex app-server 使用 env 对应账号，保留 ``ultra`` 由客户端处理。
+结果缓存在 env 旁的 ``*.model-checks.json``，普通查询仅展示上次结果，不再生成挑战。
+缓存不包含登录令牌、原始账号 ID 或模型回答。指纹库内概率不是降智概率，
+不能证明模型身份或推理强度实际生效；Astra 与 6.1 Sol 可能无法据此区分。
 
 使用示例
 --------
