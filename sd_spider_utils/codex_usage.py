@@ -5,12 +5,15 @@ import asyncio
 import base64
 import binascii
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from getpass import getpass
+from http.client import IncompleteRead
 import json
 import math
 from pathlib import Path
 import re
 import sys
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -102,6 +105,22 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
+def _query_retry_delay(retry_after, attempt):
+    delay = 2**attempt
+    if retry_after:
+        try:
+            delay = max(delay, float(retry_after))
+        except ValueError:
+            try:
+                until = parsedate_to_datetime(retry_after)
+                delay = max(delay, (until - datetime.now(timezone.utc)).total_seconds())
+            except (TypeError, ValueError, OverflowError):
+                pass
+    if not math.isfinite(delay) or delay > 60:
+        raise ValueError("服务端要求较长时间后重试，请稍后重新查询") from None
+    return delay
+
+
 def _get_json(url, access_token, account_id, timeout):
     # 只允许这两个查询地址；不提供兑换重置卡的请求方法或入口。
     if url not in (USAGE_URL, RESET_CREDITS_URL):
@@ -116,23 +135,36 @@ def _get_json(url, access_token, account_id, timeout):
             "User-Agent": "sd-spider-utils/codex-usage",
         },
     )
-    try:
-        with build_opener(_NoRedirect()).open(request, timeout=timeout) as response:
-            payload = json.load(response)
-    except HTTPError as exc:
-        hints = {
-            401: "登录令牌失效，请重新登录并更新 env 中的账号对",
-            403: "访问被拒绝，请检查账号权限或网络环境",
-            429: "查询过于频繁，请稍后重试",
-        }
-        raise ValueError(
-            f"HTTP {exc.code}：{hints.get(exc.code, '查询失败')}"
-        ) from None
-    except (URLError, OSError):
-        raise ValueError("连接失败或超时，请检查网络及 HTTPS_PROXY 设置") from None
-    except (ValueError, UnicodeError):
-        raise ValueError("查询接口未返回有效 JSON") from None
-    return payload
+    opener = build_opener(_NoRedirect())
+    for attempt in range(4):
+        retry_after = None
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                return json.load(response)
+        except HTTPError as exc:
+            retry_after = (exc.headers or {}).get("Retry-After")
+            exc.close()
+            hints = {
+                401: "登录令牌失效，请重新登录并更新 env 中的账号对",
+                403: "访问被拒绝，请检查账号权限或网络环境",
+                429: "查询过于频繁，请稍后重试",
+            }
+            message = f"HTTP {exc.code}：{hints.get(exc.code, '查询失败')}"
+            if exc.code not in (408, 429, 500, 502, 503, 504):
+                raise ValueError(message) from None
+        except (URLError, OSError, IncompleteRead):
+            message = "连接失败或超时，请检查网络及 HTTPS_PROXY 设置"
+        except (ValueError, UnicodeError):
+            raise ValueError("查询接口未返回有效 JSON") from None
+        if attempt == 3:
+            raise ValueError(f"{message}（已重试 3 次）") from None
+        delay = _query_retry_delay(retry_after, attempt)
+        label = "额度" if url == USAGE_URL else "重置卡"
+        print(
+            f"{label}查询暂时失败，{format(delay, 'g')} 秒后重试 {attempt + 1}/3…",
+            file=sys.stderr,
+        )
+        time.sleep(delay)
 
 
 def fetch_usage(access_token, account_id, timeout=30):
@@ -560,7 +592,10 @@ def main(argv=None):
         help="每次检测挑战超时秒数，默认 300",
     )
     parser.add_argument(
-        "--timeout", type=float, default=30, help="每个账号请求超时秒数，默认 30"
+        "--timeout",
+        type=float,
+        default=30,
+        help="每次查询请求超时秒数，默认 30；临时故障最多重试 3 次",
     )
     args = parser.parse_args(argv)
     if not math.isfinite(args.timeout) or args.timeout <= 0:

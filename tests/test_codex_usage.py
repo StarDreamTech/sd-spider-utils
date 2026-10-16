@@ -1,5 +1,8 @@
 import asyncio
 import contextlib
+from datetime import datetime, timezone
+from email.utils import formatdate
+from http.client import IncompleteRead
 import io
 import json
 from pathlib import Path
@@ -162,25 +165,135 @@ class CodexUsageTests(unittest.TestCase):
                 request, None, 302, "", {}, "https://example.com"
             )
         )
-        for error in (
-            HTTPError(usage.USAGE_URL, 401, "secret", {}, None),
-            HTTPError(usage.USAGE_URL, 403, "secret", {}, None),
-            HTTPError(usage.USAGE_URL, 429, "secret", {}, None),
-            URLError("secret"),
-            TimeoutError("secret"),
+        for error, attempts in (
+            *(
+                (HTTPError(usage.USAGE_URL, code, "secret", {}, None), attempts)
+                for code, attempts in (
+                    (401, 1),
+                    (403, 1),
+                    (404, 1),
+                    (408, 4),
+                    (429, 4),
+                    (500, 4),
+                    (502, 4),
+                    (503, 4),
+                    (504, 4),
+                )
+            ),
+            (URLError("secret"), 4),
+            (TimeoutError("secret"), 4),
+            (IncompleteRead(b"secret"), 4),
         ):
+            opener.reset_mock()
             opener.open.side_effect = error
-            with patch.object(usage, "build_opener", return_value=opener):
+            errors = io.StringIO()
+            with (
+                self.subTest(
+                    error=type(error).__name__, code=getattr(error, "code", None)
+                ),
+                patch.object(usage, "build_opener", return_value=opener),
+                patch.object(usage.time, "sleep") as sleep,
+                contextlib.redirect_stderr(errors),
+            ):
                 with self.assertRaises(ValueError) as raised:
                     usage.fetch_usage("secret", "account")
+            self.assertEqual(opener.open.call_count, attempts)
+            self.assertEqual(sleep.call_count, attempts - 1)
             self.assertNotIn("secret", str(raised.exception))
+            self.assertNotIn("secret", errors.getvalue())
         opener.open.side_effect = None
         for body in (b"<html>secret</html>", b"[]", b'{"error":"secret"}'):
+            opener.reset_mock()
             opener.open.return_value = io.BytesIO(body)
-            with patch.object(usage, "build_opener", return_value=opener):
+            with (
+                patch.object(usage, "build_opener", return_value=opener),
+                patch.object(usage.time, "sleep") as sleep,
+            ):
                 with self.assertRaises(ValueError) as raised:
                     usage.fetch_usage("secret", "account")
+            opener.open.assert_called_once()
+            sleep.assert_not_called()
             self.assertNotIn("secret", str(raised.exception))
+
+    def test_both_queries_succeed_on_third_retry_without_polluting_json(self):
+        accounts = {None: {"access_token": "secret", "account_id": "private-id"}}
+        opener = Mock()
+        opener.open.side_effect = [
+            URLError("secret"),
+            TimeoutError("secret"),
+            HTTPError(usage.USAGE_URL, 503, "secret", {}, None),
+            io.BytesIO(b'{"plan_type":"plus"}'),
+            IncompleteRead(b"secret"),
+            HTTPError(usage.RESET_CREDITS_URL, 429, "secret", {}, None),
+            OSError("secret"),
+            io.BytesIO(b'{"available_count":2,"credits":[]}'),
+        ]
+        output, errors = io.StringIO(), io.StringIO()
+        with (
+            patch.object(usage, "load_accounts", return_value=accounts),
+            patch.object(usage, "build_opener", return_value=opener),
+            patch.object(usage.time, "sleep") as sleep,
+            contextlib.redirect_stdout(output),
+            contextlib.redirect_stderr(errors),
+        ):
+            self.assertEqual(usage.main(["--env", "unused.env", "--json"]), 0)
+        result = json.loads(output.getvalue())[0]
+        self.assertEqual(result["plan_type"], "plus")
+        self.assertEqual(result["rate_limit_reset_credits"]["available_count"], 2)
+        self.assertEqual(
+            [call.args[0].full_url for call in opener.open.call_args_list],
+            [usage.USAGE_URL] * 4 + [usage.RESET_CREDITS_URL] * 4,
+        )
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2, 4] * 2)
+        for attempt in ("1/3", "2/3", "3/3"):
+            self.assertEqual(errors.getvalue().count(attempt), 2)
+        for secret in ("secret", "private-id"):
+            self.assertNotIn(secret, output.getvalue() + errors.getvalue())
+
+    def test_retry_after_respects_server_wait_and_skips_long_delay(self):
+        now = 1800000000
+        for retry_after, delay in (
+            ("8", 8),
+            (formatdate(now + 17, usegmt=True), 17),
+            ("0", 1),
+            ("invalid-secret", 1),
+            ("61", None),
+            (formatdate(now + 61, usegmt=True), None),
+        ):
+            opener = Mock()
+            opener.open.side_effect = [
+                HTTPError(
+                    usage.USAGE_URL,
+                    429,
+                    "secret",
+                    {"Retry-After": retry_after},
+                    None,
+                ),
+                io.BytesIO(b'{"plan_type":"plus"}'),
+            ]
+            errors = io.StringIO()
+            with (
+                self.subTest(retry_after=retry_after),
+                patch.object(usage, "build_opener", return_value=opener),
+                patch.object(usage, "datetime", wraps=datetime) as clock,
+                patch.object(usage.time, "sleep") as sleep,
+                contextlib.redirect_stderr(errors),
+            ):
+                clock.now.return_value = datetime.fromtimestamp(now, timezone.utc)
+                if delay is None:
+                    with self.assertRaisesRegex(ValueError, "稍后") as raised:
+                        usage.fetch_usage("secret", "private-id")
+                    opener.open.assert_called_once()
+                    sleep.assert_not_called()
+                    self.assertNotIn("secret", str(raised.exception))
+                else:
+                    self.assertEqual(
+                        usage.fetch_usage("secret", "private-id"),
+                        {"plan_type": "plus"},
+                    )
+                    self.assertEqual(opener.open.call_count, 2)
+                    sleep.assert_called_once_with(delay)
+            self.assertNotIn("secret", errors.getvalue())
 
     def test_cli_continues_after_one_account_fails(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -191,21 +304,28 @@ class CodexUsageTests(unittest.TestCase):
                 encoding="utf-8",
             )
             output = io.StringIO()
-            responses = [ValueError("HTTP 401：登录令牌失效"), {"plan_type": "plus"}]
+            opener = Mock()
+            opener.open.side_effect = [
+                *([URLError("secret")] * 4),
+                io.BytesIO(b'{"plan_type":"plus"}'),
+            ]
             with (
-                patch.object(usage, "fetch_usage", side_effect=responses) as fetch,
+                patch.object(usage, "build_opener", return_value=opener),
+                patch.object(usage.time, "sleep"),
                 patch.object(
                     usage,
                     "fetch_reset_credits",
                     return_value={"available_count": 0, "credits": []},
                 ),
+                contextlib.redirect_stderr(io.StringIO()),
             ):
                 with contextlib.redirect_stdout(output):
                     status = usage.main(["--env", str(env), "--json"])
             self.assertEqual(status, 1)
-            self.assertEqual(fetch.call_count, 2)
+            self.assertEqual(opener.open.call_count, 5)
             results = json.loads(output.getvalue())
             self.assertIn("error", results[0])
+            self.assertIn("已重试 3 次", results[0]["error"])
             self.assertEqual(results[1]["plan_type"], "plus")
             self.assertIn("updated_at", results[1])
             self.assertNotIn("secret", output.getvalue())
@@ -580,13 +700,15 @@ class CodexUsageTests(unittest.TestCase):
                 io.BytesIO(
                     b'{"plan_type":"plus","rate_limit_reset_credits":{"available_count":2}}'
                 ),
-                error,
+                *([error] * (1 if isinstance(error, HTTPError) else 4)),
             ]
             output = io.StringIO()
             with (
                 patch.object(usage, "load_accounts", return_value=accounts),
                 patch.object(usage, "build_opener", return_value=opener),
+                patch.object(usage.time, "sleep"),
                 contextlib.redirect_stdout(output),
+                contextlib.redirect_stderr(io.StringIO()),
             ):
                 self.assertEqual(usage.main(["--env", "unused.env", "--json"]), 1)
             result = json.loads(output.getvalue())[0]
