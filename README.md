@@ -19,6 +19,7 @@ pip install "sd_spider_utils[requests-go]"  # Scrapy + requests-go
 pip install "sd_spider_utils[curl-cffi]"    # Scrapy + curl-cffi
 pip install "sd_spider_utils[drissionpage]" # Scrapy + DrissionPage
 pip install "sd_spider_utils[scrapling]"    # Scrapy + Scrapling
+pip install "sd_spider_utils[model-check]"  # Codex 模型指纹检测
 pip install "sd_spider_utils[all]"          # 安装全部可选功能
 ```
 
@@ -139,6 +140,11 @@ JSON 中对应 `rate_limit_reset_credits`，包含 `available_count` 和 `credit
 明细查询失败时保留用量及用量接口给出的张数，并输出 `reset_credits_error`。
 缺失字段显示“未知”，不会当作零用量，也不会推算固定 Token 总配额。
 每次运行重新查询；不修改 env、不刷新登录令牌。单账号失败不影响其他账号查询。
+额度和重置卡查询遇到网络错误、超时或 HTTP 408/429/500/502/503/504 时，
+各最多额外重试 3 次（含首次共最多 4 次），默认依次等待 1、2、4 秒。
+服务端提供 `Retry-After` 时至少等待指定时间；若要求等待超过 60 秒则停止并提示稍后查询。
+401/403 等非临时错误及无效 JSON 不重试；`--timeout` 默认 30 秒，适用于每次请求。
+重试进度写入 stderr，不混入 `--json` 输出；额度查询重试不会重新运行模型检测。
 退出码：`0` 全部成功，`1` 至少一个账号查询、主动检测或检测结果保存失败，`2` 参数、env 配置或检测依赖错误。
 
 支持 UTF-8（含 BOM）、空行、注释、`export KEY=VALUE` 和单行单/双引号；
@@ -379,9 +385,11 @@ uv build
 
 ```bash
 # 打标签之后自动发布
-# 改 pyproject.toml: version = "1.0.8"
-git add .
-git commit -m "release 1.0.8"
-git tag v1.0.8
-git push origin main --tags
+# 核对 pyproject.toml: version = "1.0.9"，并运行 uv lock 同步锁文件
+# 逐项暂存要发布的文件，排除账号 env、检测缓存和本地数据
+git diff --cached --check
+git diff --cached --stat
+git commit -m "发布：准备 1.0.9 版本"
+git tag -a v1.0.9 -m "发布 1.0.9"
+git push origin main v1.0.9
 ```
