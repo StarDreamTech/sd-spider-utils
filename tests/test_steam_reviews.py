@@ -170,6 +170,123 @@ class SteamReviewsTests(unittest.TestCase):
                     steam.load_checkpoint(self.output, 246420, "schinese")
                 )
 
+    def interrupted_scan(self):
+        """首屏两条、第二页一条后网络失败，留下指向第三页的断点。"""
+        with self.assertRaisesRegex(RuntimeError, "timeout"):
+            steam.collect(
+                client(page(review(3, 30), cursor="c2"), RuntimeError("timeout")),
+                page(review(5, 50), review(4, 40), cursor="c1"),
+                self.output,
+                set(),
+            )
+        return steam.load_resume(self.output, 246420, "schinese", None)
+
+    def test_interrupted_scan_resumes_from_saved_cursor(self):
+        state = self.interrupted_scan()
+        self.assertEqual(
+            {k: state[k] for k in ("cursor", "newest_created_at", "last_created_at")},
+            {"cursor": "c2", "newest_created_at": 50, "last_created_at": 30},
+        )
+        self.assertEqual((state["pages"], state["cutoff"]), (2, None))
+        self.assertIsNone(steam.load_checkpoint(self.output, 246420, "schinese"))
+        known = steam.load_existing(self.output, 246420, "schinese")
+        # 中断后新增 6；首屏补到断点起始时间 50（同秒也检查），再从 c2 续翻。
+        fake = client(page(review(2, 20), review(1, 10), cursor="c3"), page())
+        first = page(review(6, 60), review(5, 50), review(4, 40), cursor="n1")
+        added = steam.collect(fake, first, self.output, known, resume=state)
+        self.assertEqual(added, 3)
+        self.assertEqual(
+            [c.args for c in fake.fetch.call_args_list], [("c2",), ("c3",)]
+        )
+        rows = [
+            json.loads(line)["recommendationid"]
+            for line in self.output.read_text("utf-8").splitlines()
+        ]
+        self.assertEqual(rows, ["5", "4", "3", "6", "2", "1"])
+        self.assertEqual(steam.load_checkpoint(self.output, 246420, "schinese"), 60)
+        self.assertFalse(steam.resume_path(self.output).exists())
+        self.assertIn("从断点继续（上次已翻 2 页）", self.log.getvalue())
+
+    def test_failed_resume_keeps_cursor_and_rejects_stale_cursor(self):
+        state = self.interrupted_scan()
+        known = steam.load_existing(self.output, 246420, "schinese")
+        first = page(review(6, 60), review(5, 50), review(4, 40), cursor="n1")
+        # 补完新评测、续翻一页后再次失败：断点前进到 c3，起点更新为 60。
+        with self.assertRaisesRegex(RuntimeError, "timeout"):
+            steam.collect(
+                client(page(review(2, 20), cursor="c3"), RuntimeError("timeout")),
+                first,
+                self.output,
+                known,
+                resume=state,
+            )
+        state = steam.load_resume(self.output, 246420, "schinese", None)
+        self.assertEqual(
+            (state["cursor"], state["newest_created_at"], state["last_created_at"]),
+            ("c3", 60, 20),
+        )
+        self.assertEqual(state["pages"], 3)
+        known = steam.load_existing(self.output, 246420, "schinese")
+        for stale, message in [
+            (page(review(9, 90), cursor="x"), "游标可能已失效"),
+            (page(), "空页"),
+        ]:
+            with self.subTest(stale=stale):
+                with self.assertRaisesRegex((ValueError, RuntimeError), message):
+                    steam.collect(
+                        client(stale), first, self.output, known, resume=state
+                    )
+                self.assertEqual(
+                    steam.load_resume(self.output, 246420, "schinese", None)["cursor"],
+                    "c3",
+                )
+                self.assertIsNone(
+                    steam.load_checkpoint(self.output, 246420, "schinese")
+                )
+
+    def test_resume_ignored_for_other_boundary_truncation_or_fresh(self):
+        self.interrupted_scan()
+        self.assertIsNone(steam.load_resume(self.output, 246420, "schinese", 30))
+        with self.assertRaisesRegex(ValueError, "--fresh"):
+            steam.load_resume(self.output, 246420, "all", None)
+        original = self.output.read_bytes()
+        self.output.write_bytes(original[:-5])
+        self.assertIsNone(steam.load_resume(self.output, 246420, "schinese", None))
+        self.output.write_bytes(original)
+        steam.resume_path(self.output).write_text("{broken", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "断点文件无效"):
+            steam.load_resume(self.output, 246420, "schinese", None)
+
+    def test_main_previews_and_uses_resume_unless_fresh(self):
+        self.interrupted_scan()
+        args = ["--kingdom-rush", "1", "--output", str(self.output)]
+        first = page(review(6, 60), review(5, 50), review(4, 40), total=400)
+        fake = client(first, page(review(1, 10), cursor="c3"), page())
+        with (
+            patch.object(steam, "ReviewClient", return_value=fake),
+            patch("builtins.input", return_value=""),
+        ):
+            self.assertEqual(steam.main(args), 0)
+        self.assertEqual(
+            [c.args for c in fake.fetch.call_args_list], [("*",), ("c2",), ("c3",)]
+        )
+        self.assertIn("翻页断点：上次已翻 2 页", self.log.getvalue())
+        self.assertIn("预计 HTTP 请求：约 3 次", self.log.getvalue())
+        # --fresh：忽略断点，从首屏的游标往下翻。
+        self.output.unlink()
+        self.output.with_name(self.output.name + ".state.json").unlink()
+        self.interrupted_scan()
+        fake = client(first, page())
+        with (
+            patch.object(steam, "ReviewClient", return_value=fake),
+            patch("builtins.input", return_value=""),
+        ):
+            self.assertEqual(steam.main(args + ["--fresh"]), 0)
+        self.assertEqual(
+            [c.args for c in fake.fetch.call_args_list], [("*",), ("next",)]
+        )
+        self.assertFalse(steam.resume_path(self.output).exists())
+
     def test_preview_cancel_eof_confirm_and_init_protection(self):
         output = self.output.parent / "new" / "reviews.jl"
         args = ["--kingdom-rush", "1", "--output", str(output)]

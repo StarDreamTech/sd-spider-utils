@@ -16,6 +16,9 @@
 初始化完成后，在 .jl.state.json 保存成功时间边界；后续读到更早的评测就停止。
 同一秒的评测会全部检查，已有 ID 跳过。失败不推进边界，重新执行同一命令补采。
 状态文件需与 JL 一起保留；未完成初始化或没有状态文件时，先去重补齐完整初始化。
+每页写入后在 .jl.resume.json 记录下一页游标。扫描中断后重跑同一命令，会先补首屏到
+上次起点之间的新评测，再从断点游标继续往旧翻，不再从最新一页重扫；完成后自动删除。
+--fresh 忽略断点，从最新一页重新扫描。
 --mode full 可手动扫描全部历史，补充延迟公开或后来改成目标语言的旧评测。
 不要同时运行两个任务写同一文件。
 “全部”指接口当前公开可返回的评测，不包括被删除或无权访问的内容。
@@ -233,14 +236,63 @@ def save_checkpoint(output, client, newest_created_at):
     temporary.replace(path)
 
 
-def collect(client, first_page, output, known_ids, cutoff=None):
-    """倒序去重追加；有成功基线时跨过时间边界即停，同秒记录不提前跳过。"""
-    page = first_page
-    cursors = {"*"}
+def resume_path(output):
+    """翻页断点与 JL 同目录：<文件名>.resume.json。"""
+    return output.with_name(output.name + ".resume.json")
+
+
+def load_resume(output, appid, language, cutoff):
+    """读取未完成扫描的翻页断点；时间边界不同或 JL 被截短时不使用，内容无效则报错。"""
+    path = resume_path(output)
+    if not path.exists() or not output.exists():
+        return None
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        state = None
+    counters = ("newest_created_at", "last_created_at", "pages", "file_size")
+    if not isinstance(state, dict) or (
+        state.get("appid") != appid
+        or state.get("language") != language
+        or not isinstance(state.get("cursor"), str)
+        or state["cursor"] in {"", "*"}
+        or any(type(state.get(key)) is not int or state[key] < 0 for key in counters)
+        or (state.get("cutoff") is not None and type(state["cutoff"]) is not int)
+    ):
+        raise ValueError(
+            f"翻页断点文件无效或不属于本任务：{path}；可加 --fresh 忽略断点重新扫描"
+        )
+    if state.get("cutoff") != cutoff or output.stat().st_size < state["file_size"]:
+        return None
+    return state
+
+
+def save_resume(output, client, cutoff, cursor, newest, last, pages):
+    """每页写入并刷新后原子替换断点：下一页游标、已覆盖的发布时间范围和页数。"""
+    path = resume_path(output)
+    temporary = path.with_name(path.name + ".tmp")
+    state = {
+        "appid": client.appid,
+        "language": client.language,
+        "cutoff": cutoff,
+        "cursor": cursor,
+        "newest_created_at": newest,
+        "last_created_at": last,
+        "pages": pages,
+        "file_size": output.stat().st_size,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    temporary.write_text(json.dumps(state, ensure_ascii=False) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def collect(client, first_page, output, known_ids, cutoff=None, resume=None):
+    """倒序去重追加；有成功基线时跨过时间边界即停，同秒记录不提前跳过。
+
+    resume 为翻页断点时，先从首屏补到断点起始时间（同秒也检查），再从断点游标继续。
+    """
     added = scanned = pages = 0
     newest_created_at = cutoff or 0
-    previous_created_at = None
-    reached_cutoff = False
     output.parent.mkdir(parents=True, exist_ok=True)
     # 有效 JSON 的最后一行可能没有换行，追加前补一个行分隔符。
     needs_newline = False
@@ -249,60 +301,120 @@ def collect(client, first_page, output, known_ids, cutoff=None):
             stream.seek(-1, 2)
             needs_newline = stream.read(1) != b"\n"
     with output.open("a", encoding="utf-8", newline="\n") as stream:
-        while True:
-            reviews = validate_page(page, client.language)["reviews"]
-            if not reviews:
-                break
-            timestamps = [review["timestamp_created"] for review in reviews]
-            if (
-                previous_created_at is not None and timestamps[0] > previous_created_at
-            ) or any(
-                earlier < later for earlier, later in zip(timestamps, timestamps[1:])
-            ):
-                raise ValueError("Steam 评测未按发布时间倒序返回，停止采集且不推进边界")
-            previous_created_at = timestamps[-1]
-            newest_created_at = max(newest_created_at, timestamps[0])
-            cursor = page["cursor"]
-            if not cursor or cursor in cursors:
-                raise RuntimeError(
-                    "Steam 分页游标重复或未推进，未完成采集；已保存数据保留"
+
+        def scan(page, requested, stop_before, previous_created_at, done=None):
+            """从 page 往旧翻到空页或越过 stop_before；返回是否越过。
+
+            done 为断点已翻页数时，每页写入后更新断点；None 表示不更新。
+            """
+            nonlocal added, scanned, pages, newest_created_at, needs_newline
+            cursors = {requested}
+            while True:
+                reviews = validate_page(page, client.language)["reviews"]
+                if not reviews:
+                    if requested != "*" and cursors == {requested}:
+                        raise RuntimeError(
+                            "断点游标返回空页，无法确认是否已翻到末尾；"
+                            "可加 --fresh 从最新一页重新扫描"
+                        )
+                    return False
+                timestamps = [review["timestamp_created"] for review in reviews]
+                if (
+                    previous_created_at is not None
+                    and timestamps[0] > previous_created_at
+                ):
+                    if requested != "*" and cursors == {requested}:
+                        raise ValueError(
+                            "断点游标返回了比上次更新的评测，游标可能已失效；"
+                            "可加 --fresh 从最新一页重新扫描"
+                        )
+                    raise ValueError(
+                        "Steam 评测未按发布时间倒序返回，停止采集且不推进边界"
+                    )
+                if any(
+                    earlier < later
+                    for earlier, later in zip(timestamps, timestamps[1:])
+                ):
+                    raise ValueError(
+                        "Steam 评测未按发布时间倒序返回，停止采集且不推进边界"
+                    )
+                previous_created_at = timestamps[-1]
+                newest_created_at = max(newest_created_at, timestamps[0])
+                cursor = page["cursor"]
+                if not cursor or cursor in cursors:
+                    raise RuntimeError(
+                        "Steam 分页游标重复或未推进，未完成采集；已保存数据保留"
+                    )
+                cursors.add(cursor)
+                pages += 1
+                reached = False
+                observed_at = datetime.now(timezone.utc).isoformat()
+                for review in reviews:
+                    if (
+                        stop_before is not None
+                        and review["timestamp_created"] < stop_before
+                    ):
+                        reached = True
+                        break
+                    scanned += 1
+                    identity = review_id(review)
+                    if identity in known_ids:
+                        continue
+                    item = dict(review)
+                    item["_collection"] = {
+                        "source_platform": "steam",
+                        "appid": client.appid,
+                        "language": client.language,
+                        "collected_at": observed_at,
+                    }
+                    if needs_newline:
+                        stream.write("\n")
+                        needs_newline = False
+                    stream.write(json.dumps(item, ensure_ascii=False) + "\n")
+                    known_ids.add(identity)
+                    added += 1
+                stream.flush()
+                print(
+                    f"第 {pages} 页：{len(reviews)} 条 | 已扫描 {scanned} | 新增 {added} | 跳过 {scanned - added}",
+                    flush=True,
                 )
-            cursors.add(cursor)
-            pages += 1
-            observed_at = datetime.now(timezone.utc).isoformat()
-            for review in reviews:
-                if cutoff is not None and review["timestamp_created"] < cutoff:
-                    reached_cutoff = True
-                    break
-                scanned += 1
-                identity = review_id(review)
-                if identity in known_ids:
-                    continue
-                item = dict(review)
-                item["_collection"] = {
-                    "source_platform": "steam",
-                    "appid": client.appid,
-                    "language": client.language,
-                    "collected_at": observed_at,
-                }
-                if needs_newline:
-                    stream.write("\n")
-                    needs_newline = False
-                stream.write(json.dumps(item, ensure_ascii=False) + "\n")
-                known_ids.add(identity)
-                added += 1
-            stream.flush()
+                if reached:
+                    return True
+                if done is not None:
+                    done += 1
+                    save_resume(
+                        output,
+                        client,
+                        cutoff,
+                        cursor,
+                        newest_created_at,
+                        previous_created_at,
+                        done,
+                    )
+                page = client.fetch(cursor)
+
+        reached_cutoff = False
+        if resume is None:
+            reached_cutoff = scan(first_page, "*", cutoff, None, done=0)
+        # 首屏到断点起始时间之间是中断后的新评测；补完前保留原断点。
+        elif scan(first_page, "*", resume["newest_created_at"], None):
             print(
-                f"第 {pages} 页：{len(reviews)} 条 | 已扫描 {scanned} | 新增 {added} | 跳过 {scanned - added}",
+                f"已补齐中断后的新评测，从断点继续（上次已翻 {resume['pages']:,} 页）。",
                 flush=True,
             )
-            if reached_cutoff:
-                print("已越过上次成功采集的发布时间边界，停止请求后续旧评论。")
-                break
-            page = client.fetch(cursor)
+            reached_cutoff = scan(
+                client.fetch(resume["cursor"]),
+                resume["cursor"],
+                cutoff,
+                resume["last_created_at"],
+                done=resume["pages"],
+            )
+        if reached_cutoff:
+            print("已越过上次成功采集的发布时间边界，停止请求后续旧评论。")
         stream.flush()
         os.fsync(stream.fileno())
     save_checkpoint(output, client, newest_created_at)
+    resume_path(output).unlink(missing_ok=True)
     print(f"采集完成：扫描 {scanned} 条，新增 {added} 条，跳过 {scanned - added} 条。")
     print(
         f"本地唯一评论 {len(known_ids)} 条；实际 HTTP 请求 {client.requests} 次（含预览、末页及重试）。"
@@ -347,6 +459,11 @@ def build_parser():
     parser.add_argument(
         "--interval", type=float, default=1, help="请求最小间隔（秒），至少 1，默认 1"
     )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="忽略上次中断留下的翻页断点，从最新一页重新扫描",
+    )
     return parser
 
 
@@ -383,6 +500,11 @@ def main(argv=None):
             if args.mode not in {"init", "full"}
             else None
         )
+        resume = (
+            None
+            if args.mode == "init" or args.fresh
+            else load_resume(output, appid, language, cutoff)
+        )
         mode = (
             "增量（按发布时间倒序，遇到历史边界即停）"
             if cutoff is not None
@@ -403,7 +525,20 @@ def main(argv=None):
         print(f"\n游戏：{name}（{appid}）\n语言：{language}\n模式：{mode}")
         print("范围：全部好差评、全部购买来源、包含离题评测（接口可公开返回的部分）")
         print(f"符合条件的评论总数：{total:,} 条\n每页最多：{args.page_size} 条")
-        if cutoff is None:
+        if resume is not None:
+            stopped, started = (
+                datetime.fromtimestamp(resume[key], timezone.utc).isoformat()
+                for key in ("last_created_at", "newest_created_at")
+            )
+            print(
+                f"翻页断点：上次已翻 {resume['pages']:,} 页，停在发布时间 {stopped}。"
+                f"\n确认后先补齐 {started} 之后的新评测，再从断点继续往旧翻；"
+                "加 --fresh 可忽略断点。"
+            )
+        if resume is not None and cutoff is None:
+            expected = max(1, math.ceil(total / args.page_size) + 1 - resume["pages"])
+            print(f"预计 HTTP 请求：约 {expected:,} 次（从断点续翻，另加新评测页）")
+        elif cutoff is None:
             expected = math.ceil(total / args.page_size) + 1
             print(f"预计 HTTP 请求：约 {expected:,} 次（本次完整扫描，含末尾空页确认）")
         else:
@@ -419,21 +554,21 @@ def main(argv=None):
         print(f"预览已请求 {client.requests} 次，确认后复用首屏。")
         print("估算不含重试；实际分页可能不足一页，采集期间总数也可能变化。")
         print(f"本地已有唯一 ID：{len(known_ids):,} 个\n输出：{output.resolve()}")
-        if known_ids and cutoff is None:
+        if known_ids and cutoff is None and resume is None:
             print(
                 "本次先完整扫描并去重，完成后建立增量边界；后续运行只请求新增时间段。"
             )
         if input("\n确认请直接按回车开始；输入任意文字再回车取消：") != "":
             print("已取消，未写入文件。")
             return 0
-        collect(client, first_page, output, known_ids, cutoff=cutoff)
+        collect(client, first_page, output, known_ids, cutoff=cutoff, resume=resume)
         return 0
     except EOFError:
         print("未收到回车确认，已取消，未写入文件。")
         return 0
     except KeyboardInterrupt:
         print(
-            "\n已中断；已写入的完整记录保留，可重新运行同一命令去重补采。",
+            "\n已中断；已写入的完整记录和翻页断点保留，重新运行同一命令即可续采。",
             file=sys.stderr,
         )
         return 130
